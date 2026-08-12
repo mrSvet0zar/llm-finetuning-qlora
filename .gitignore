@@ -1,0 +1,31 @@
+# Environnements
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Modeles & checkpoints (lourds — a heberger sur HF Hub)
+outputs/
+*.gguf
+*.bin
+*.safetensors
+
+# Caches HuggingFace
+.cache/
+hf_cache/
+
+# Logs / tracking
+runs/
+wandb/
+*.log
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code (local)
+.claude/
+
+# On garde les datasets (petits) pour la reproductibilite :
+# data/raw/ et data/processed/ ne sont PAS ignores.

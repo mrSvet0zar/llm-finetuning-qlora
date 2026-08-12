@@ -1,0 +1,45 @@
+# ============================================================
+#  Fine-Tuning Qwen2.5-3B (QLoRA) — Environnement local Windows
+#  GPU cible : RTX 4070 Laptop (8 Go VRAM), CUDA 12.x
+# ============================================================
+#
+#  torch DOIT etre installe separement avec l'index CUDA :
+#    pip install torch --index-url https://download.pytorch.org/whl/cu124
+#  (voir setup.ps1 / README). On ne le met pas ici pour eviter
+#  que pip installe la version CPU par defaut.
+# ------------------------------------------------------------
+
+# --- Coeur Hugging Face ---
+transformers>=4.46.0
+peft>=0.13.0
+accelerate>=1.0.0
+datasets>=3.0.0
+
+# --- Quantization 4-bit (wheels Windows CUDA disponibles >=0.43) ---
+bitsandbytes>=0.44.0
+
+# --- Tokenizer / formats ---
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+
+# --- Evaluation ---
+evaluate>=0.4.3
+rouge-score>=0.1.2
+sacrebleu>=2.4.0
+nltk>=3.9.0
+
+# --- Experiment tracking (TensorBoard par defaut, wandb optionnel) ---
+tensorboard>=2.17.0
+
+# --- Serving / API ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.9.0
+
+# --- Utilitaires ---
+scikit-learn>=1.5.0
+tqdm>=4.66.0
+huggingface-hub>=0.26.0
+
+# --- Optionnel (decommenter si utilise) ---
+# wandb>=0.18.0

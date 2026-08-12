@@ -1,0 +1,25 @@
+# Modelfile pour Ollama — modele fine-tune Python/DS/ML
+#
+# Prerequis : avoir converti le modele fusionne en GGUF (voir README, Phase 5).
+#   FROM pointe vers le fichier .gguf quantise.
+#
+# Creation :  ollama create qwen-pyds -f Modelfile
+# Execution : ollama run qwen-pyds "Qu'est-ce que LoRA ?"
+
+FROM ./outputs/merged-model-gguf/model-q4_k_m.gguf
+
+# Parametres de generation
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+
+# Template ChatML (format natif Qwen2.5)
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+{{ .Response }}<|im_end|>
+"""
+
+SYSTEM """Tu es un assistant expert en Python, data science et machine learning. Tu reponds de facon claire, correcte et concise, avec des exemples pertinents quand c'est utile."""
