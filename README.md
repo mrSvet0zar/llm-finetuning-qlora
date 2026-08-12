@@ -10,6 +10,10 @@ FastAPI + Ollama).
 > **parameter-efficient fine-tuning (PEFT/LoRA)**, de la **quantization 4-bit**,
 > et du cycle MLOps complet d'un modèle de langage.
 
+> 📓 **Démo rapide** : [`notebooks/demo.ipynb`](notebooks/demo.ipynb) — parcours
+> end-to-end avec graphiques et réponses du modèle déjà exécutés (visibles
+> directement sur GitHub, sans rien lancer).
+
 ---
 
 ## 🎯 En bref
@@ -118,6 +122,8 @@ finetuning/
 ├── data/
 │   ├── raw/                 # raw_qa_data.json (corpus brut)
 │   └── processed/           # train/val/test.jsonl
+├── notebooks/
+│   └── demo.ipynb           # Démo end-to-end (sorties + graphiques embarqués)
 ├── prepare_dataset.py       # Validation → dédup → split → JSONL
 ├── train.py                 # Fine-tuning QLoRA (cœur du projet)
 ├── inference.py             # Génération avec le modèle fine-tuné
