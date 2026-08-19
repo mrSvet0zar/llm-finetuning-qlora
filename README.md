@@ -396,6 +396,37 @@ spécialise le modèle sans toucher à ses poids d'origine.
 
 ---
 
+## 📋 Gouvernance & publication
+
+| Document | Contenu |
+|---|---|
+| [**MODEL_CARD.md**](MODEL_CARD.md) | Usage prévu et **déconseillé**, procédure d'entraînement, résultats avec IC, limites, biais, impact environnemental |
+| [**DATASET_CARD.md**](DATASET_CARD.md) | Composition, méthode de découpage, constitution, limites documentées |
+
+Les deux cartes affichent en tête ce qui compte le plus pour un utilisateur :
+
+> ⚠️ **Ce modèle produit des réponses bien formées mais parfois factuellement
+> fausses** — « RAG (*Relevant Answer Generation*) », ROUGE-1 et ROUGE-L
+> inversés. Ces erreurs sont **plausibles et bien rédigées**, donc difficiles à
+> repérer pour un lecteur non expert. C'est ce qui les rend dangereuses.
+
+Une model card qui ne mentionnerait que les gains serait de la publicité, pas
+de la documentation.
+
+### Publication
+
+```bash
+python scripts/publish_to_hub.py                     # simulation (défaut)
+python scripts/publish_to_hub.py --confirm --dataset # publication réelle
+```
+
+`scripts/publish_to_hub.py` **ne contient et ne réclame aucun jeton** : il
+s'appuie sur `huggingface-cli login` déjà effectué, refuse de publier sans
+authentification, et fonctionne **en simulation par défaut** — pousser sur le
+Hub est public et difficilement réversible.
+
+---
+
 ## 🚀 Service d'inférence
 
 ### Le bug corrigé : la boucle d'événements bloquée
@@ -452,21 +483,38 @@ uvicorn api_server:app --host 0.0.0.0 --port 8000
 python scripts/load_test.py -n 10 -c 2 --stream    # p50/p95/p99 + TTFT
 ```
 
-### ⚠️ vLLM : documenté, non mesuré
+### ⚠️ vLLM : tenté sous WSL2, non abouti — aucun chiffre avancé
 
-vLLM (batching continu, PagedAttention) est **la** réponse au débit — mais il ne
-supporte pas Windows nativement, seulement Linux ou WSL2. Il n'a donc **pas été
-exécuté ni mesuré ici**, et aucun chiffre le concernant n'est avancé. Sur une
-machine Linux :
+vLLM (batching continu, PagedAttention) est **la** réponse au débit. Ne
+supportant pas Windows nativement, il a été tenté via **WSL2 avec passthrough
+GPU** — le GPU y est bien visible (RTX 4070, driver 610.88). Trois tentatives,
+trois murs différents :
+
+| Tentative | Résultat |
+|---|---|
+| vLLM **0.27.1** (moteur V1) | `RuntimeError: UVA is not available` — le moteur V1 alloue ses buffers via *Unified Virtual Addressing*, que le passthrough GPU de WSL2 (GPU-PV) n'expose pas. **Limite architecturale**, pas un réglage. |
+| vLLM **0.6.6** (moteur V0) + transformers récent | `AttributeError: Qwen2Tokenizer has no attribute all_special_tokens_extended` — API retirée depuis. |
+| vLLM **0.6.6** + transformers 4.47.1 épinglé | `AttributeError: 'list' object has no attribute 'keys'` — le modèle fusionné a été sauvegardé par transformers 5.x, illisible par la 4.47. |
+
+Impasse de matrice de dépendances : faire fonctionner l'ensemble exigerait de
+re-sauvegarder le modèle avec une transformers ancienne, ce qui **casserait la
+propriété d'artefact identique** sur laquelle repose la comparaison.
+
+> **Conséquence assumée : aucun chiffre vLLM n'est avancé dans ce projet.**
+> Un gain de débit non mesuré n'est pas un résultat — et ce serait précisément
+> le genre d'affirmation que ce projet passe son temps à débusquer.
+
+Sur une machine Linux native, le modèle fusionné (`merge_model.py`) est un
+checkpoint standard, directement servi par :
 
 ```bash
-pip install vllm
 python -m vllm.entrypoints.openai.api_server \
   --model outputs/merged-model --max-model-len 1024 --gpu-memory-utilization 0.85
 ```
 
-Le modèle fusionné (`merge_model.py`) est un checkpoint standard, donc
-directement compatible.
+*Note mémoire relevée au passage : sur 8 Go, seuls **6,89 Go** sont réellement
+libres — le compositeur Windows en occupe ~1,1 Go. Un détail qui décide de la
+faisabilité et qu'aucune documentation ne mentionne.*
 
 ---
 
@@ -567,6 +615,8 @@ finetuning/
 ├── merge_model.py           # Fusion adaptateur LoRA → modèle autonome
 ├── api_server.py            # Serveur d'inférence FastAPI
 ├── Modelfile                # Déploiement Ollama (GGUF)
+├── MODEL_CARD.md            # ⭐ Carte du modele (usage, limites, biais)
+├── DATASET_CARD.md          # ⭐ Carte du dataset (composition, decoupage)
 ├── Dockerfile               # ⭐ Image d'inference (multi-etapes, sans poids)
 ├── pyproject.toml           # ⭐ Paquet + config ruff & pytest
 ├── .pre-commit-config.yaml  # ⭐ Hooks avant commit
@@ -745,10 +795,12 @@ ollama create qwen-pyds -f Modelfile
 - [x] Authentification par clé API, rate limiting (seau à jetons), `/metrics`,
       `/ready` distinct de `/health`, bornes et timeouts
 - [x] Test de charge avec percentiles (`scripts/load_test.py`)
-- [ ] **vLLM** — documenté mais **non mesuré** : pas de support Windows natif,
-      nécessite Linux ou WSL2
+- [x] **Model card** et **dataset card** documentant usages, limites et biais
+- [x] Script de publication HF Hub (simulation par défaut, sans jeton en clair)
+- [ ] **vLLM** — tenté sous WSL2, **non abouti** (UVA indisponible en GPU-PV +
+      incompatibilités de versions). Aucun chiffre avancé
 - [ ] Publier l'image Docker sur un registre
-- [ ] Publier l'adaptateur sur le Hugging Face Hub + **model card**
+- [ ] Exécuter la publication HF (nécessite `huggingface-cli login`)
 
 ---
 
