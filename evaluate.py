@@ -21,6 +21,7 @@ import argparse
 import json
 import random
 import sys
+import unicodedata
 from pathlib import Path
 
 import torch
@@ -43,6 +44,12 @@ def load_test(cfg: Config) -> list[dict]:
     return data
 
 
+def strip_accents(text: str) -> str:
+    """Retire les diacritiques (metriques == metriques)."""
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+
+
 def _per_example_rouge(predictions: list[str], references: list[str]) -> list[dict]:
     """Scores ROUGE par exemple (necessaires pour le bootstrap)."""
     scorer = rouge_scorer.RougeScorer(
@@ -56,14 +63,28 @@ def _per_example_rouge(predictions: list[str], references: list[str]) -> list[di
 
 
 def compute_metrics(predictions: list[str], references: list[str],
-                    n_bootstrap: int = 1000, seed: int = 42) -> dict:
+                    n_bootstrap: int = 1000, seed: int = 42,
+                    normalize_accents: bool = True) -> dict:
     """Metriques ponctuelles + intervalles de confiance a 95 % par bootstrap.
 
     Sur un jeu de test de quelques dizaines d'exemples, un score isole n'est
     qu'une estimation bruitee. On reechantillonne le jeu avec remise pour
     estimer la dispersion : si les intervalles de deux modeles se recouvrent
     largement, la difference observee n'est pas etablie.
+
+    `normalize_accents` (actif par defaut) retire les diacritiques des DEUX
+    cotes avant comparaison. Sans cela, la mesure est biaisee : le corpus de
+    reference de ce projet est ecrit sans accents, le modele fine-tune a donc
+    appris a ne pas en mettre, tandis que le modele de base ecrit un francais
+    correctement accentue. ROUGE comparant des tokens exacts, `metriques` et
+    `metriques` accentue comptent comme differents : la baseline etait penalisee
+    pour une raison purement orthographique, ce qui gonflait le gain d'environ
+    +0.044 de ROUGE-1. La normalisation neutralise cet artefact.
     """
+    if normalize_accents:
+        predictions = [strip_accents(p) for p in predictions]
+        references = [strip_accents(r) for r in references]
+
     n = len(predictions)
     per_ex = _per_example_rouge(predictions, references)
 
@@ -181,7 +202,9 @@ def main() -> None:
             print(f"  {label:8s} {base_v:.4f} -> {ft_v:.4f} "
                   f"({(ft_v-base_v)/base_v*100:+.0f} %)  [{verdict}]")
 
-    out_dir = Path(cfg.train.output_dir)
+    # Les resultats sont ecrits A COTE de l'adaptateur evalue (et non dans le
+    # dossier par defaut) : indispensable pour le multi-seed et le sweep.
+    out_dir = Path(adapter)
     with open(out_dir / "eval_metrics.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     # Predictions brutes : indispensables pour l'analyse qualitative des echecs

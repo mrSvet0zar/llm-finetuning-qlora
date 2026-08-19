@@ -35,20 +35,41 @@ réponse partagée avec l'entraînement), fine-tuné **vs** modèle de base
 (`python evaluate.py --baseline`). Intervalles de confiance à 95 % obtenus par
 **bootstrap** (1000 rééchantillonnages) :
 
-| Métrique | Modèle de base | Fine-tuné | Gain | IC 95 % |
-|---|---|---|---|---|
-| ROUGE-1 | 0.260 `[0.245–0.276]` | **0.359** `[0.341–0.376]` | **+38 %** | ✅ disjoints |
-| ROUGE-2 | 0.030 `[0.024–0.037]` | **0.050** `[0.041–0.059]` | **+65 %** | ✅ disjoints |
-| ROUGE-L | 0.127 `[0.117–0.137]` | **0.166** `[0.154–0.177]` | **+31 %** | ✅ disjoints |
-| BLEU | 1.92 `[1.19–2.70]` | **4.46** `[3.03–5.90]` | **+132 %** | ✅ disjoints |
+Quatre approches comparées, **toutes avec la même connaissance disponible**
+(les 85 concepts d'entraînement) et la même procédure de décodage. Métriques
+avec accents normalisés des deux côtés (voir
+[l'artefact de mesure](#️-un-artefact-de-mesure--les-accents)) :
 
-Les intervalles du modèle de base et du modèle fine-tuné ne se recouvrent sur
-aucune métrique : **le gain est statistiquement établi**, et non un artefact
-d'échantillonnage.
+| Approche | ROUGE-1 | ROUGE-L | BLEU |
+|---|---|---|---|
+| base, zero-shot | 0.304 `[0.283–0.324]` | 0.147 `[0.134–0.160]` | 2.31 `[1.5–3.1]` |
+| base, few-shot (3 ex.) | 0.299 `[0.272–0.324]` | 0.153 `[0.139–0.167]` | 2.41 `[1.8–3.0]` |
+| base + RAG (top-3) | 0.302 `[0.280–0.324]` | 0.148 `[0.134–0.163]` | 3.14 `[2.1–4.4]` |
+| **fine-tuné (QLoRA)** | **0.360** `[0.342–0.377]` | **0.167** `[0.155–0.178]` | **4.46** `[3.0–5.9]` |
 
-> ⚠️ **Portée de cet intervalle** : le bootstrap quantifie le bruit dû à
-> l'échantillon de test, **pas** la variance due à l'entraînement lui-même
-> (un seul seed). Une validation complète exigerait 3 seeds — voir pistes.
+**Lecture rigoureuse des intervalles** — c'est là que le résultat devient nuancé :
+
+| Métrique | Verdict |
+|---|---|
+| ROUGE-1 | fine-tuné **disjoint** du zero-shot → gain **établi** ✅ |
+| ROUGE-L | **recouvre** le few-shot → gain **non établi** ⚠️ |
+| BLEU | **recouvre** le RAG → gain **non établi** ⚠️ |
+| BERTScore | 0.657 → **0.702** (+6,8 %), gain **modeste** |
+
+Sur **3 graines**, le fine-tuné donne ROUGE-1 **0.3632 ± 0.0043** et BLEU
+**4.86 ± 0.68** : le gain est robuste à la variabilité d'entraînement
+(voir [Rigueur expérimentale](#-rigueur-expérimentale)).
+
+> **Deux sources d'incertitude, deux mesures** : le bootstrap quantifie le bruit
+> de l'**échantillon de test** ; l'écart-type multi-graines quantifie celui de
+> l'**entraînement**. Les deux sont nécessaires — l'un ne remplace pas l'autre.
+
+> 🎯 **Conclusion honnête** : le fine-tuning apporte un gain **réel mais modeste,
+> et concentré sur la forme**. Il n'améliore pas l'exactitude factuelle, limitée
+> par le modèle de base de 3 Md. Ni le few-shot ni le RAG ne font mieux. Pour un
+> usage exigeant la justesse du contenu, le levier ne serait pas « plus de
+> fine-tuning » mais **un modèle de base plus fort** ou **du RAG sur une vraie
+> base documentaire**.
 
 **Courbe d'apprentissage** (loss de validation) :
 
@@ -68,8 +89,13 @@ Durée : **7 min 25 s** sur la RTX 4070 (~7 Go / 8 Go de VRAM).
 |---|---|
 | Corpus curé (7 catégories) | ✅ 126 concepts, `data/corpus/` |
 | Préparation (split groupe + stratifié) | ✅ 255 / 17 / 24, **fuite = 0** |
-| Entraînement QLoRA (RTX 4070) | ✅ 7 min 25 s, meilleur checkpoint @ 1 epoch |
-| Évaluation ROUGE/BLEU + baseline + IC | ✅ gains à IC disjoints |
+| Entraînement QLoRA (RTX 4070) | ✅ meilleur checkpoint @ 1 epoch |
+| Évaluation ROUGE/BLEU + IC bootstrap | ✅ |
+| Sweep d'hyperparamètres (6 configs) | ✅ non concluant — et c'est la conclusion |
+| Multi-graines (3 seeds) | ✅ ROUGE-1 0.3632 ± 0.0043 |
+| Baselines few-shot / RAG | ✅ aucune ne bat le fine-tuning |
+| Évaluation sémantique (BERTScore) | ✅ gain modeste (+6,8 %) |
+| Analyse qualitative des échecs | ✅ erreurs factuelles documentées |
 | Inférence (base 4-bit + adaptateur) | ✅ |
 | Fusion LoRA → modèle autonome | ✅ `merge_model.py` |
 | Serveur API FastAPI (`/generate`) | ✅ testé (latence ~12 s / 120 tok) |
@@ -109,8 +135,10 @@ mesurait de la mémorisation, pas de la généralisation.
 ### Les deux conséquences
 
 1. **Métriques gonflées.** Le BLEU annoncé (10,08) tombe à **4,46** sur un
-   protocole propre. Le *gain relatif* du fine-tuning, lui, reste réel et se
-   confirme même renforcé (+38 % de ROUGE-1 contre +26 % annoncés).
+   protocole propre. Le *gain relatif* du fine-tuning reste réel — mais un
+   second artefact, celui des accents, le réduira encore ensuite (de +38 % à
+   environ **+18 %** de ROUGE-1). Voir
+   [l'artefact de mesure](#️-un-artefact-de-mesure--les-accents).
 2. **Overfitting masqué.** En v1, la loss de validation décroissait sagement
    (2,19 → 1,68), suggérant un apprentissage sain. Une fois la fuite éliminée,
    elle **remonte dès la 2ᵉ epoch** : le modèle sur-apprenait, et la fuite le
@@ -149,6 +177,190 @@ référence traverse le split :
 Ce contrôle a été **validé négativement** (on lui a soumis un jeu volontairement
 fuyant pour vérifier qu'il bloque bien) — un contrôle jamais vu échouer n'est
 pas un contrôle.
+
+---
+
+## 📐 Rigueur expérimentale
+
+### Recherche d'hyperparamètres
+
+`python scripts/sweep.py` — grille learning rate × rang LoRA, **6 configurations**,
+sélectionnées sur la **loss de validation** (jamais sur le test).
+
+Le nombre d'epochs n'est volontairement **pas** balayé : `load_best_model_at_end`
+combiné à l'early stopping le sélectionne déjà automatiquement. Le balayer
+reviendrait à optimiser deux fois la même chose.
+
+| config | lr | rang | eval_loss | meilleur step |
+|---|---|---|---|---|
+| lr2e-4_r16 | 2e-4 | 16 | **2.1142** | 16 |
+| lr1e-4_r32 | 1e-4 | 32 | 2.1209 | 16 |
+| lr1e-4_r8 | 1e-4 | 8 | 2.1225 | 48 |
+| lr2e-4_r8 | 2e-4 | 8 | 2.1241 | 24 |
+| lr1e-4_r16 | 1e-4 | 16 | 2.1255 | 32 |
+| lr2e-4_r32 | 2e-4 | 32 | 2.1257 | 16 |
+
+**Étendue totale : 0.0115** — soit 0,5 % de la valeur mesurée.
+
+> Observation transverse : `best_step = 16` (≈ 1 epoch) pour la majorité des
+> configurations. **Le sur-apprentissage précoce n'est pas un accident de
+> réglage, il est structurel** à ce volume de données.
+
+### Variance d'entraînement (3 graines)
+
+`python scripts/multi_seed.py --lr 2e-4 --lora-r 16 --seeds 42 1337 2024`
+
+| seed | eval_loss | ROUGE-1 | ROUGE-L | BLEU |
+|---|---|---|---|---|
+| 42 | 2.1142 | 0.3594 | 0.1660 | 4.46 |
+| 1337 | 2.1200 | 0.3679 | 0.1731 | 5.64 |
+| 2024 | 2.1177 | 0.3624 | 0.1689 | 4.47 |
+| **moyenne ± σ** | 2.1173 ± 0.0029 | **0.3632 ± 0.0043** | **0.1693 ± 0.0036** | **4.86 ± 0.68** |
+
+*Contrôle de reproductibilité : le seed 42 redonne exactement `2.1142`, valeur
+identique au run correspondant du sweep.*
+
+### ⚖️ Ce que la combinaison des deux révèle
+
+| Source de variation | écart-type |
+|---|---|
+| Entre **configurations** (6 configs, 1 graine chacune) | 0.0043 |
+| Entre **graines** (1 config, 3 graines) | 0.0029 |
+
+Les deux sont **du même ordre de grandeur**. L'avantage de la « meilleure »
+configuration sur la deuxième (0.0067) ne représente que ~2,3 écarts-types de
+bruit de graine.
+
+> **Conclusion honnête : ce sweep ne permet pas de désigner un gagnant.**
+> Avec une seule graine par configuration, l'effet des hyperparamètres est
+> indiscernable du bruit d'entraînement. Un sweep concluant exigerait plusieurs
+> graines par configuration (6 × 3 = 18 runs). Annoncer une « configuration
+> optimale » sur cette base reviendrait à sur-apprendre sur du hasard.
+
+En revanche, le **gain du fine-tuning lui-même est massif devant ce bruit** :
+ROUGE-1 passe de 0.260 à 0.363, soit **+0.103, environ 24 écarts-types**. Cette
+conclusion-là est solide.
+
+---
+
+## 🔎 Ce que les métriques ne disent pas
+
+`python scripts/failure_analysis.py` — analyse des sorties réelles, sans GPU.
+
+### Aucun échec structurel…
+
+| Contrôle | Résultat |
+|---|---|
+| Réponses tronquées | 0 / 24 |
+| Répétitions dégénérées | 0 / 24 |
+| Réponses vides ou trop courtes | 0 / 24 |
+| Ratio de longueur (généré / référence) | médiane **1.13** |
+
+Le modèle produit systématiquement des réponses bien formées, de longueur
+appropriée, dans le style du corpus. **C'est exactement ce que ROUGE et BLEU
+récompensent** — et cela explique l'essentiel du gain mesuré.
+
+### …mais des erreurs factuelles réelles
+
+En lisant les générations, le tableau change :
+
+| Génération du modèle | Réalité |
+|---|---|
+| « RAG (**Relevant Answer Generation**) » | **Retrieval**-Augmented Generation |
+| « ROUGE-**L** compare les tokens exacts, ROUGE-**1** les phrases identiques » | Les deux sont inversés |
+| « `chunksize` donne une taille maximale d'**entraînement** par chunk » | Aucun rapport |
+| « `async`/`await` permettent d'**écrimer** les callbacks » | Mot inexistant |
+
+> **Le modèle a appris le style et le format, pas la maîtrise du fond.**
+> C'est le résultat attendu d'un fine-tuning sur 85 concepts : la forme
+> s'apprend vite, le savoir bien plus lentement. Et les métriques lexicales y
+> sont **structurellement aveugles**, puisqu'elles ne comptent que des mots
+> communs.
+
+C'est précisément pourquoi ce projet ajoute des métriques sémantiques et des
+baselines : sans elles, on conclurait à tort que le modèle « connaît » le
+domaine.
+
+### Évaluation sémantique (BERTScore)
+
+`python scripts/semantic_eval.py`
+
+| Modèle | BERTScore F1 |
+|---|---|
+| Base | 0.6569 |
+| Fine-tuné | **0.7018** |
+
+| Approche | BERTScore F1 |
+|---|---|
+| base, zero-shot | 0.6569 |
+| base, few-shot | 0.6581 |
+| base + RAG | 0.6649 |
+| **fine-tuné** | **0.7018** |
+
+**+6,8 %** en relatif — à comparer aux **+18 %** de ROUGE-1 et **+93 %** de BLEU
+sur les mêmes sorties. **Plus la métrique s'approche du sens et s'éloigne de la
+forme de surface, plus le gain rétrécit.** Cet écart *est* le résultat.
+
+*(Attention à l'échelle : BERTScore est compressé et descend rarement sous 0.6
+entre textes de même langue ; les pourcentages ne sont pas comparables d'une
+métrique à l'autre. C'est la tendance relative qui informe.)*
+
+### Toutes les approches hallucinent
+
+Sur la question « Qu'est-ce que le score ROUGE ? », les expansions produites
+pour l'acronyme :
+
+| Approche | Expansion produite |
+|---|---|
+| Référence | Recall-Oriented Understudy for Gisting Evaluation ✅ |
+| zero-shot | « Résumé Rouge » ❌ |
+| few-shot | « Résumé-Outil de Vérification Rédactionnellement Optimal » ❌ |
+| RAG | « Référentiel de Outil de Qualité pour Langage Naturel » ❌ |
+| fine-tuné | *n'invente pas l'acronyme, mais inverse ROUGE-1 et ROUGE-L* ❌ |
+
+> **Le fine-tuning n'a pas introduit ces erreurs : le modèle de base 3B les
+> produit déjà.** La limite est la connaissance du modèle de base, pas la
+> méthode d'adaptation. Aucune des quatre approches ne la corrige.
+
+Le RAG échoue ici pour une raison **structurelle** : le découpage étant
+group-aware, aucun passage du corpus d'entraînement ne contient la réponse à une
+question de test. Le RAG ne peut fournir que du contexte *voisin*. C'est ce qui
+rend la comparaison équitable, mais cela sous-estime ce que donnerait un RAG en
+production, avec une base documentaire couvrant réellement les questions posées.
+
+---
+
+## ⚠️ Un artefact de mesure : les accents
+
+> Second défaut méthodologique détecté et corrigé, après la fuite de données.
+
+Le corpus de référence de ce projet a été écrit **sans accents** (choix initial
+de robustesse console). Le modèle fine-tuné a donc appris à ne pas en mettre,
+tandis que le modèle de base écrit un français correctement accentué.
+
+ROUGE et BLEU comparant des **tokens exacts**, `métriques` et `metriques`
+comptent comme deux mots différents. La baseline était donc pénalisée pour une
+raison purement orthographique :
+
+| Approche | ROUGE-1 brut | Accents normalisés | Écart | Taux d'accents |
+|---|---|---|---|---|
+| zero-shot | 0.2603 | **0.3040** | **+0.044** | 2,70 % |
+| few-shot | 0.2511 | **0.2988** | **+0.048** | 2,75 % |
+| RAG | 0.2572 | **0.3016** | **+0.044** | 2,70 % |
+| fine-tuné | 0.3594 | 0.3601 | +0.001 | **0,06 %** |
+
+**Environ la moitié du gain ROUGE-1 initialement mesuré (+38 %) n'était qu'un
+alignement de style d'écriture.** Après correction, le gain réel est d'environ
+**+18 %**.
+
+`compute_metrics` normalise désormais les accents **des deux côtés** par défaut.
+`scripts/rescore.py` recalcule les métriques depuis les prédictions sauvegardées
+et affiche les deux versions, pour rendre l'artefact visible plutôt que de le
+corriger en silence.
+
+> Leçon : une décision cosmétique sur le format des données (« retirer les
+> accents pour la console ») a contaminé la mesure. **Tout choix de
+> prétraitement est un choix méthodologique.**
 
 ---
 
@@ -195,6 +407,12 @@ finetuning/
 │   └── config.py            # Configuration centrale (dataclasses)
 ├── scripts/
 │   ├── generate_dataset.py  # Assemble le corpus + attribue les group_id
+│   ├── sweep.py             # ⭐ Recherche d'hyperparamètres (lr × rang LoRA)
+│   ├── multi_seed.py        # ⭐ Entraînement multi-graines (variance réelle)
+│   ├── baselines.py         # ⭐ zero-shot / few-shot / RAG vs fine-tuning
+│   ├── semantic_eval.py     # ⭐ BERTScore + harnais LLM-as-a-judge
+│   ├── failure_analysis.py  # ⭐ Analyse qualitative des échecs (sans GPU)
+│   ├── rescore.py           # ⭐ Re-scoring sans regénérer (artefact accents)
 │   ├── smoke_test.py        # Test du chat template + masquage (sans GPU lourd)
 │   └── test_api.py          # Test de fumée de l'API FastAPI
 ├── data/
@@ -257,7 +475,18 @@ python inference.py --prompt "Explique la différence entre LoRA et QLoRA"
 ### 5. Évaluation
 
 ```bash
-python evaluate.py --baseline        # compare fine-tuné vs modèle de base
+python evaluate.py --baseline        # fine-tuné vs modèle de base, avec IC 95 %
+```
+
+### 6. Protocole expérimental complet
+
+```bash
+python scripts/sweep.py                                    # recherche d'hyperparamètres
+python scripts/multi_seed.py --lr 2e-4 --lora-r 16         # variance sur 3 graines
+python scripts/baselines.py --include-ft                   # few-shot / RAG / fine-tuné
+python scripts/semantic_eval.py                            # BERTScore
+python scripts/failure_analysis.py                         # analyse qualitative (sans GPU)
+python scripts/rescore.py                                  # re-scoring sans regénérer
 ```
 
 ---
@@ -336,13 +565,24 @@ ollama create qwen-pyds -f Modelfile
 ## 🔭 Feuille de route
 
 **Rigueur ML**
-- [ ] Entraîner sur **3 seeds** et rapporter moyenne ± écart-type (le bootstrap
-      actuel ne capture que le bruit du jeu de test, pas celui de l'entraînement)
-- [ ] **Sweep d'hyperparamètres** (learning rate × rang LoRA × epochs)
-- [ ] Baseline **few-shot prompting** et **RAG** — le fine-tuning était-il le bon
-      outil ? Comparer avant de conclure
-- [ ] Évaluation sémantique (**BERTScore**, **LLM-as-a-judge**)
-- [ ] Analyse qualitative des échecs à partir de `eval_predictions.json`
+- [x] Entraînement sur **3 graines**, moyenne ± écart-type
+- [x] **Sweep d'hyperparamètres** (lr × rang LoRA) — conclusion : non concluant,
+      l'effet est du même ordre que le bruit de graine
+- [x] Baselines **few-shot** et **RAG** — le fine-tuning était-il le bon outil ?
+- [x] Évaluation sémantique **BERTScore**
+- [x] Analyse qualitative des échecs
+- [x] Correction de l'**artefact des accents** dans le scoring
+- [ ] **Réécrire le corpus en français correctement accentué** — la normalisation
+      sans accents était un mauvais choix pour un dataset français, et c'est elle
+      qui a créé l'artefact de mesure
+- [ ] **LLM-as-a-judge** — harnais écrit (`scripts/semantic_eval.py --judge`),
+      non exécuté faute de juge fort : un Qwen-3B jugeant ses propres sorties est
+      biaisé par auto-préférence. Nécessite une clé API
+- [ ] Sweep **avec plusieurs graines par configuration** (6 × 3 = 18 runs), seule
+      façon de conclure sur les hyperparamètres
+- [ ] Comparer à un **modèle de base plus fort** (7B+) — c'est le levier que
+      l'analyse d'échecs désigne pour l'exactitude factuelle
+- [ ] RAG sur une **vraie base documentaire** (et non le seul corpus d'entraînement)
 - [ ] Étendre le corpus à 500+ concepts
 
 **Ingénierie**

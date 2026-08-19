@@ -55,12 +55,15 @@ def load_model(cfg: Config, adapter_path: str | None, merged_path: str | None):
 
 
 @torch.no_grad()
-def generate(model, tokenizer, question: str, max_new_tokens: int = 320,
-             temperature: float = 0.7, top_p: float = 0.9) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
+def generate_from_messages(model, tokenizer, messages: list[dict],
+                           max_new_tokens: int = 320,
+                           temperature: float = 0.7, top_p: float = 0.9) -> str:
+    """Generation a partir d'une conversation arbitraire.
+
+    Separee de `generate` pour permettre aux baselines (few-shot, RAG) de
+    construire leurs propres messages tout en partageant exactement la meme
+    procedure de decodage — condition d'une comparaison equitable.
+    """
     enc = tokenizer.apply_chat_template(
         messages, add_generation_prompt=True, return_tensors="pt", return_dict=True,
     )
@@ -85,6 +88,14 @@ def generate(model, tokenizer, question: str, max_new_tokens: int = 320,
     # Ne decoder que les tokens generes (apres le prompt)
     generated = outputs[0][input_ids.shape[1]:]
     return tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+
+def generate(model, tokenizer, question: str, **kwargs) -> str:
+    """Generation standard : system prompt du projet + question utilisateur."""
+    return generate_from_messages(model, tokenizer, [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ], **kwargs)
 
 
 def main() -> None:

@@ -18,6 +18,7 @@ Puis, pour visualiser :
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from dataclasses import dataclass
@@ -183,9 +184,46 @@ def prepare_datasets(cfg: Config, tokenizer):
 # ---------------------------------------------------------------------------
 #  Entrainement
 # ---------------------------------------------------------------------------
-def main() -> None:
+def build_config(args: argparse.Namespace) -> Config:
+    """Config par defaut + overrides CLI (necessaires pour le sweep/multi-seed)."""
     cfg = Config()
+    if args.lr is not None:
+        cfg.train.learning_rate = args.lr
+    if args.epochs is not None:
+        cfg.train.num_train_epochs = args.epochs
+    if args.seed is not None:
+        cfg.train.seed = args.seed
+    if args.lora_r is not None:
+        cfg.lora.r = args.lora_r
+        # Convention alpha = 2r : garde une echelle stable quand r varie.
+        cfg.lora.alpha = args.lora_alpha if args.lora_alpha else 2 * args.lora_r
+    elif args.lora_alpha is not None:
+        cfg.lora.alpha = args.lora_alpha
+    if args.output_dir:
+        cfg.train.output_dir = args.output_dir
+    if args.run_name:
+        cfg.train.run_name = args.run_name
+    return cfg
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Fine-tuning QLoRA (overrides CLI)")
+    p.add_argument("--lr", type=float, default=None, help="learning rate")
+    p.add_argument("--lora-r", type=int, default=None, help="rang LoRA")
+    p.add_argument("--lora-alpha", type=int, default=None, help="alpha LoRA (defaut 2r)")
+    p.add_argument("--epochs", type=int, default=None)
+    p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--output-dir", type=str, default=None)
+    p.add_argument("--run-name", type=str, default=None)
+    return p.parse_args()
+
+
+def main() -> None:
+    cfg = build_config(parse_args())
     set_seed(cfg.train.seed)
+    print(f"Config : lr={cfg.train.learning_rate} | r={cfg.lora.r} "
+          f"| alpha={cfg.lora.alpha} | epochs={cfg.train.num_train_epochs} "
+          f"| seed={cfg.train.seed}")
 
     if not torch.cuda.is_available():
         print("ATTENTION : aucun GPU CUDA detecte. QLoRA requiert un GPU NVIDIA.")
@@ -243,10 +281,23 @@ def main() -> None:
     trainer.save_model(str(out_dir))                # adaptateur + config
     tokenizer.save_pretrained(str(out_dir))
 
-    # Journalisation des metriques finales
+    # Journalisation des metriques finales.
+    # `trainer.evaluate()` s'execute apres rechargement du MEILLEUR checkpoint
+    # (load_best_model_at_end) : eval_loss est donc le minimum atteint.
     metrics = train_result.metrics
     eval_metrics = trainer.evaluate()
     metrics.update(eval_metrics)
+    # Hyperparametres joints aux resultats : sans cela, un dossier de run est
+    # inexploitable a posteriori.
+    metrics["hparams"] = {
+        "learning_rate": cfg.train.learning_rate,
+        "lora_r": cfg.lora.r,
+        "lora_alpha": cfg.lora.alpha,
+        "num_train_epochs": cfg.train.num_train_epochs,
+        "seed": cfg.train.seed,
+        "effective_batch_size": (cfg.train.per_device_train_batch_size
+                                 * cfg.train.gradient_accumulation_steps),
+    }
     with open(out_dir / "train_metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False)
 

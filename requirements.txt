@@ -27,6 +27,7 @@ evaluate>=0.4.3
 rouge-score>=0.1.2
 sacrebleu>=2.4.0
 nltk>=3.9.0
+bert-score>=0.3.13        # metrique semantique (embeddings contextuels)
 
 # --- Experiment tracking (TensorBoard par defaut, wandb optionnel) ---
 tensorboard>=2.17.0
