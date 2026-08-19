@@ -1,0 +1,58 @@
+[
+  {
+    "instruction": "Qu'est-ce que le score BLEU et quelles sont ses limites ?",
+    "output": "BLEU (Bilingual Evaluation Understudy) mesure la similarite entre un texte genere et une ou plusieurs references, en comparant les n-grammes communs, typiquement de 1 a 4, avec une penalite de brievete pour eviter les sorties trop courtes. Il varie de 0 a 100. Limites : il est purement lexical et ne capte ni les synonymes ni le sens, si bien qu'une bonne paraphrase peut obtenir un score faible ; il est peu fiable sur de courtes sequences et sensible au nombre de references. Concu pour la traduction, il est imparfait pour du question-reponse ouvert. On le complete donc par ROUGE, des metriques semantiques comme BERTScore, ou une evaluation humaine."
+  },
+  {
+    "instruction": "Qu'est-ce que le score ROUGE ?",
+    "output": "ROUGE (Recall-Oriented Understudy for Gisting Evaluation) est une famille de metriques orientees rappel, surtout utilisee pour le resume. ROUGE-N compte le recouvrement de n-grammes entre generation et reference ; ROUGE-L se base sur la plus longue sous-sequence commune, ce qui capture l'ordre sans exiger la contiguite. Contrairement a BLEU qui est oriente precision, ROUGE privilegie le rappel : a-t-on couvert le contenu de la reference ? On rapporte souvent la F-mesure, compromis entre precision et rappel. Memes limites que BLEU : purement lexical, aveugle aux synonymes. Utile comme signal automatique rapide et bon marche, a completer par une evaluation semantique ou humaine."
+  },
+  {
+    "instruction": "Qu'est-ce que la perplexite d'un modele de langage ?",
+    "output": "La perplexite mesure a quel point un modele de langage est surpris par un texte : c'est l'exponentielle de la loss moyenne par token. Intuitivement, elle represente le nombre effectif de choix equiprobables entre lesquels le modele hesite a chaque token ; plus elle est basse, mieux le modele predit la suite. Une perplexite de 10 signifie qu'en moyenne le modele est aussi indecis que face a 10 options equiprobables. C'est une metrique intrinseque, pratique pour comparer des modeles sur un meme corpus ou suivre l'entrainement. Limite : une faible perplexite n'implique pas des reponses utiles ou correctes ; elle mesure la modelisation du langage, pas la qualite d'usage."
+  },
+  {
+    "instruction": "Comment evaluer un LLM fine-tune au-dela de BLEU et ROUGE ?",
+    "output": "Les metriques lexicales ne suffisent pas pour du texte ouvert. On combine plusieurs approches : (1) des metriques semantiques comme BERTScore, qui comparent des embeddings plutot que des mots exacts ; (2) le LLM-as-a-judge, ou un modele fort note les reponses selon des criteres explicites (exactitude, pertinence, style), rapide et bien correle a l'humain mais a calibrer ; (3) une evaluation humaine sur un echantillon, etalon-or mais couteuse ; (4) des benchmarks specifiques a la tache et des tests de regression sur des prompts de reference ; (5) des verifications factuelles ciblees. L'ideal est un tableau de bord melant un signal automatique bon marche et des revues qualitatives periodiques."
+  },
+  {
+    "instruction": "Qu'est-ce que le LLM-as-a-judge et quels sont ses biais ?",
+    "output": "Le LLM-as-a-judge consiste a faire noter les reponses d'un modele par un autre modele, plus puissant, guide par une grille de criteres. C'est bien plus rapide et economique qu'une evaluation humaine, et la correlation avec le jugement humain est generalement bonne. Mais il souffre de biais documentes : preference pour les reponses longues, biais de position quand on compare deux reponses cote a cote, preference pour son propre style de generation, et sensibilite a la formulation de la grille. Les parades : imposer une grille precise avec exemples de notation, alterner l'ordre des reponses comparees et moyenner, demander une justification avant la note, et calibrer periodiquement le juge sur un echantillon annote par des humains."
+  },
+  {
+    "instruction": "Qu'est-ce que BERTScore et en quoi differe-t-il de ROUGE ?",
+    "output": "BERTScore compare une generation a sa reference en passant par des embeddings contextuels plutot que par des mots exacts. Chaque token de la generation est apparie au token le plus similaire de la reference, par similarite cosinus, puis on agrege ces similarites en precision, rappel et F-mesure. L'avantage decisif sur ROUGE est la prise en compte du SENS : une reformulation avec des synonymes obtient un bon score, alors que ROUGE la penaliserait lourdement. Les limites subsistent : le score depend du modele d'embedding choisi et de la langue, il reste couteux a calculer, et il ne verifie pas la veracite factuelle, seulement la proximite semantique avec une reference supposee correcte."
+  },
+  {
+    "instruction": "Pourquoi faut-il des intervalles de confiance sur les metriques d'evaluation ?",
+    "output": "Parce qu'un score calcule sur un echantillon fini est une estimation bruitee, pas une verite. Sur un jeu de test de quelques dizaines d'exemples, un ecart de plusieurs points entre deux modeles peut n'etre que du bruit d'echantillonnage. Annoncer une amelioration sans mesure d'incertitude expose a conclure a tort. La methode standard, simple et sans hypothese forte, est le bootstrap : on reechantillonne le jeu de test avec remise un millier de fois, on recalcule la metrique a chaque fois, et on prend les percentiles 2,5 et 97,5 de la distribution obtenue. Si les intervalles des deux modeles se recouvrent largement, la difference n'est pas etablie. Il est egalement essentiel de repeter l'entrainement avec plusieurs graines aleatoires, car la variance vient aussi de l'entrainement."
+  },
+  {
+    "instruction": "Qu'est-ce qu'une baseline et pourquoi est-elle indispensable ?",
+    "output": "Une baseline est un point de comparaison simple qui donne du sens a un resultat : un score absolu ne veut rien dire isolement. Selon le contexte, ce sera predire la classe majoritaire, une regression lineaire, une regle metier existante, ou pour un LLM, le modele de base non fine-tune et une variante few-shot par simple prompting. Son role est double : verifier que le modele complexe apporte reellement quelque chose, et quantifier ce gain au regard de son cout. Il est frequent qu'une baseline bien construite atteigne l'essentiel de la performance d'un modele lourd. Ne pas mesurer de baseline est l'erreur methodologique la plus courante et la plus couteuse, car elle conduit a deployer de la complexite inutile."
+  },
+  {
+    "instruction": "Comment construire un jeu de test de qualite pour un LLM specialise ?",
+    "output": "Quelques principes. Il doit etre representatif de l'usage reel, pas seulement des cas faciles, et couvrir explicitement les cas limites et les questions hors domaine sur lesquelles on attend un refus ou une prudence. Il doit etre suffisamment grand pour que les differences observees depassent le bruit, ce qui suppose en general au moins une centaine d'exemples. Il doit etre strictement disjoint du jeu d'entrainement, y compris pour les quasi-doublons et les paraphrases, faute de quoi on mesure de la memorisation. Il doit rester stable dans le temps pour permettre des comparaisons entre versions, et etre gele : on ne l'inspecte pas a repetition pour ajuster le modele, sinon il devient un second jeu de validation et perd son caractere non biaise."
+  },
+  {
+    "instruction": "Qu'est-ce que la contamination d'un benchmark ?",
+    "output": "La contamination survient quand les donnees d'un benchmark d'evaluation se retrouvent, volontairement ou non, dans le corpus de pre-entrainement ou de fine-tuning d'un modele. Le modele a alors potentiellement memorise les reponses, et son score reflete cette memorisation plutot qu'une reelle capacite de generalisation. C'est un probleme majeur pour les LLM, dont les corpus d'entrainement issus du web contiennent souvent les benchmarks publics eux-memes. Les indices d'alerte sont un score anormalement eleve sur un benchmark connu contrastant avec des performances mediocres sur des variantes reformulees. Les parades consistent a utiliser des jeux de test prives et recents, a reformuler les enonces, et a privilegier des evaluations construites specifiquement pour son domaine."
+  },
+  {
+    "instruction": "Quelle est la difference entre evaluation hors ligne et evaluation en ligne ?",
+    "output": "L'evaluation hors ligne se fait sur un jeu de donnees fige, avant deploiement : elle est rapide, reproductible et sans risque, mais elle ne mesure qu'un proxy de la valeur reelle. L'evaluation en ligne mesure le comportement du systeme aupres de vrais utilisateurs, via des tests A/B et des indicateurs metier : taux d'acceptation d'une suggestion, temps de resolution, satisfaction, taux de reformulation. Il est courant qu'un gain hors ligne ne se traduise pas en gain en ligne, parce que la metrique choisie ne capture pas ce qui compte pour l'utilisateur. La demarche saine consiste donc a filtrer les candidats hors ligne, puis a valider en ligne sur une fraction du trafic avant generalisation."
+  },
+  {
+    "instruction": "Comment detecter une fuite de donnees dans un protocole d'evaluation ?",
+    "output": "Le premier signal d'alerte est un score anormalement bon, en particulier une performance de test proche ou superieure a celle de validation. Les verifications concretes sont simples et doivent etre automatisees : chercher les exemples strictement identiques entre train et test ; chercher les quasi-doublons par similarite lexicale ou par embeddings, car une paraphrase partageant la meme reponse cible constitue une fuite ; verifier que les transformations apprises, comme un scaler ou un encodeur, l'ont ete sur le train seul ; verifier qu'aucune variable ne contient d'information posterieure a l'instant de prediction. Sur des donnees groupees, par utilisateur, par patient ou par concept, le decoupage doit se faire par groupe entier et jamais ligne par ligne."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un test de regression pour un modele de langage ?",
+    "output": "C'est un ensemble de cas figes, avec leurs sorties attendues ou des proprietes verifiables, que l'on rejoue systematiquement a chaque nouvelle version du modele ou du prompt. Le but n'est pas de mesurer une performance globale mais de detecter les regressions : un comportement qui fonctionnait et qui casse. On y met les cas critiques du metier, les bugs deja corrigés pour eviter leur reapparition, les formats de sortie a respecter et les refus attendus sur des demandes hors perimetre. Comme la sortie d'un LLM n'est pas deterministe, on teste des proprietes plutot que l'egalite exacte : presence de champs obligatoires, validite du JSON, absence de termes interdits, seuil de similarite semantique avec une reponse de reference."
+  },
+  {
+    "instruction": "Pourquoi la taille du jeu de test influence-t-elle la fiabilite des conclusions ?",
+    "output": "Parce que l'incertitude d'une metrique decroit approximativement comme l'inverse de la racine carree du nombre d'exemples. Avec 10 exemples, l'intervalle de confiance est si large que seules des differences enormes sont detectables, et un seul cas atypique peut deplacer le score de plusieurs points. Passer a 100 exemples divise environ l'incertitude par trois, et 1000 par dix. Le nombre necessaire depend de l'ampleur de l'effet que l'on veut detecter : plus la difference attendue entre deux modeles est faible, plus il faut d'exemples. En pratique, on estime la taille requise a l'avance, on rapporte systematiquement l'intervalle de confiance a cote du score, et l'on evite de conclure sur des differences inferieures a la marge d'erreur."
+  }
+]

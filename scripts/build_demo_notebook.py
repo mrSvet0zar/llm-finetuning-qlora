@@ -103,8 +103,16 @@ md("""
 ## 3. Courbe d'apprentissage
 
 Loss d'entraînement et de validation au fil des steps (lue depuis l'état du
-`Trainer`). La décroissance **monotone** de la validation indique un
-apprentissage sain, **sans overfitting**.
+`Trainer`).
+
+La loss d'entraînement descend continûment, mais celle de **validation atteint
+son minimum vers 1 epoch puis remonte** : au-delà, le modèle sur-apprend. C'est
+`load_best_model_at_end` qui conserve le meilleur checkpoint, complété par un
+early stopping.
+
+> 💡 Ce diagnostic n'était **pas visible** dans la v1 du projet : une fuite de
+> données faisait décroître la validation artificiellement. Voir la section
+> « Correction méthodologique » du README.
 """)
 code(r"""
 def load_log_history():
@@ -114,15 +122,16 @@ def load_log_history():
                     key=lambda p: p.stat().st_mtime) if (ROOT / "outputs").exists() else []
     if states:
         return json.load(open(states[-1]))["log_history"]
-    # Repli : valeurs reelles du run initial
+    # Repli : valeurs reelles du run v2 (dataset sans fuite)
     return [
-        {"step": 2, "loss": 2.716}, {"step": 4, "loss": 2.368},
-        {"step": 5, "eval_loss": 2.190}, {"step": 6, "loss": 2.235},
-        {"step": 8, "loss": 2.041}, {"step": 10, "loss": 1.905, "eval_loss": 1.905},
-        {"step": 12, "loss": 1.704}, {"step": 14, "loss": 1.716},
-        {"step": 15, "eval_loss": 1.737}, {"step": 16, "loss": 1.680},
-        {"step": 18, "loss": 1.470}, {"step": 19, "loss": 1.416},
-        {"step": 20, "eval_loss": 1.682}, {"step": 21, "eval_loss": 1.679},
+        {"step": 5, "loss": 2.669}, {"step": 8, "eval_loss": 2.230},
+        {"step": 10, "loss": 2.149}, {"step": 15, "loss": 1.927},
+        {"step": 16, "eval_loss": 2.114}, {"step": 20, "loss": 1.669},
+        {"step": 24, "eval_loss": 2.194}, {"step": 25, "loss": 1.461},
+        {"step": 30, "loss": 1.332}, {"step": 32, "eval_loss": 2.291},
+        {"step": 35, "loss": 1.114}, {"step": 40, "loss": 0.912,
+                                      "eval_loss": 2.449},
+        {"step": 45, "loss": 1.001}, {"step": 48, "eval_loss": 2.433},
     ]
 
 hist = load_log_history()
@@ -144,32 +153,45 @@ print(f"eval loss : {ev[0][1]:.3f} -> {ev[-1][1]:.3f}")
 md("""
 ## 4. Gain mesuré du fine-tuning
 
-Comparaison sur le jeu de test entre le **modèle de base** et le **modèle
-fine-tuné**, via ROUGE (recouvrement lexical) et BLEU.
+Comparaison sur le jeu de test — **strictement disjoint** de l'entraînement —
+entre le modèle de base et le modèle fine-tuné.
+
+Les barres d'erreur sont les **intervalles de confiance à 95 %** obtenus par
+bootstrap. Sur un jeu de test de 24 exemples, un écart sans mesure d'incertitude
+ne prouve rien : ce qui compte est que les intervalles **ne se recouvrent pas**.
 """)
 code(r"""
 metrics = json.load(open(ROOT / "outputs" / "qwen2.5-3b-pyds-lora" / "eval_metrics.json"))
 base, ft = metrics["baseline"], metrics["finetuned"]
 
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4))
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4))
 
-# ROUGE (echelle 0-1)
-labels = ["ROUGE-1", "ROUGE-2", "ROUGE-L"]
-keys = ["rouge1", "rouge2", "rougeL"]
-x = range(len(labels)); w = 0.35
-a1.bar([i - w/2 for i in x], [base[k] for k in keys], w, label="base", color="#B0B0B0")
-a1.bar([i + w/2 for i in x], [ft[k] for k in keys], w, label="fine-tuné", color="#4C72B0")
-a1.set_xticks(list(x)); a1.set_xticklabels(labels); a1.set_title("ROUGE"); a1.legend()
+# --- ROUGE (echelle 0-1) ---
+labels, keys = ["ROUGE-1", "ROUGE-2", "ROUGE-L"], ["rouge1", "rouge2", "rougeL"]
+x, w = range(len(labels)), 0.35
+for offset, m, lab, col in ((-w/2, base, "base", "#B0B0B0"),
+                            (w/2, ft, "fine-tuné", "#4C72B0")):
+    a1.bar([i + offset for i in x], [m[k] for k in keys], w, label=lab, color=col,
+           yerr=[[m[k] - m["ci95"][k][0] for k in keys],
+                 [m["ci95"][k][1] - m[k] for k in keys]],
+           capsize=4, ecolor="#333333")
+a1.set_xticks(list(x)); a1.set_xticklabels(labels)
+a1.set_title("ROUGE (IC 95 %)"); a1.legend()
 
-# BLEU (echelle 0-100)
-a2.bar(["base", "fine-tuné"], [base["bleu"], ft["bleu"]], color=["#B0B0B0", "#55A868"])
-a2.set_title("BLEU")
-for i, v in enumerate([base["bleu"], ft["bleu"]]):
-    a2.text(i, v + 0.2, f"{v:.1f}", ha="center")
+# --- BLEU (echelle 0-100) ---
+a2.bar(["base", "fine-tuné"], [base["bleu"], ft["bleu"]],
+       color=["#B0B0B0", "#55A868"], capsize=5, ecolor="#333333",
+       yerr=[[base["bleu"] - base["ci95"]["bleu"][0], ft["bleu"] - ft["ci95"]["bleu"][0]],
+             [base["ci95"]["bleu"][1] - base["bleu"], ft["ci95"]["bleu"][1] - ft["bleu"]]])
+a2.set_title("BLEU (IC 95 %)")
 plt.tight_layout(); plt.show()
 
-print(f"ROUGE-1 : {base['rouge1']:.3f} -> {ft['rouge1']:.3f}  ({(ft['rouge1']-base['rouge1'])/base['rouge1']*100:+.0f}%)")
-print(f"BLEU    : {base['bleu']:.2f} -> {ft['bleu']:.2f}  ({(ft['bleu']-base['bleu'])/base['bleu']*100:+.0f}%)")
+print(f"n = {ft['n_samples']} exemples de test\n")
+for k, lab in (("rouge1", "ROUGE-1"), ("rougeL", "ROUGE-L"), ("bleu", "BLEU   ")):
+    disjoint = ft["ci95"][k][0] > base["ci95"][k][1]
+    print(f"{lab} : {base[k]:.3f} -> {ft[k]:.3f} "
+          f"({(ft[k]-base[k])/base[k]*100:+.0f} %)  "
+          f"{'IC disjoints' if disjoint else 'IC qui se recouvrent'}")
 """)
 
 # ---------------------------------------------------------------- 5. Demo live
@@ -201,15 +223,31 @@ for q in questions:
 md(r"""
 ## Conclusion
 
-En **~3,5 min** d'entraînement sur un GPU grand public, le fine-tuning QLoRA a :
+En **~7 min** d'entraînement sur un GPU grand public (RTX 4070, 8 Go), le
+fine-tuning QLoRA a :
 
-- **amélioré les 4 métriques** (BLEU **×2,3**, ROUGE-1 **+26 %**) ;
+- **amélioré les 4 métriques**, avec des **intervalles de confiance disjoints** —
+  le gain n'est pas un artefact d'échantillonnage (ROUGE-1 **+38 %**,
+  BLEU **+132 %**) ;
 - adapté le **style et le format** des réponses au domaine cible ;
 - produit un **adaptateur de 119 Mo** (vs 6,2 Go pour le modèle complet), en
   n'entraînant que **0,96 %** des paramètres.
 
-➡️ Code complet : [`train.py`](../train.py) · [`evaluate.py`](../evaluate.py) ·
-[`README.md`](../README.md)
+### Ce que ce projet montre aussi
+
+Une première version souffrait d'une **fuite de données** : l'augmentation par
+paraphrase était appliquée *avant* le découpage, si bien que les réponses de
+référence du test avaient déjà été vues à l'entraînement. Elle gonflait les
+scores **et masquait un sur-apprentissage**. Le correctif — split par groupe,
+stratifié, augmentation réservée au train, contrôle bloquant — est documenté
+dans le README.
+
+> Les chiffres ci-dessus sont ceux du protocole **corrigé**. Ils sont plus bas
+> en valeur absolue que ceux de la v1, et c'est précisément ce qui les rend
+> dignes de confiance.
+
+➡️ Code complet : [`train.py`](../train.py) · [`prepare_dataset.py`](../prepare_dataset.py) ·
+[`evaluate.py`](../evaluate.py) · [`README.md`](../README.md)
 """)
 
 nb["cells"] = cells

@@ -1,0 +1,82 @@
+[
+  {
+    "instruction": "Qu'est-ce que la vectorisation en Python et pourquoi est-elle plus rapide que les boucles ?",
+    "output": "La vectorisation consiste a remplacer des boucles Python explicites par des operations sur des tableaux entiers, deleguees a du code compile (C/Fortran) via NumPy ou Pandas. Elle est plus rapide pour deux raisons : (1) la boucle s'execute en code natif, sans l'overhead de l'interpreteur CPython a chaque iteration ; (2) les donnees sont contigues en memoire, ce qui exploite le cache CPU et les instructions SIMD. Exemple : `arr * 2` traite tout le tableau d'un coup, la ou `[x*2 for x in arr]` repasse par l'interpreteur a chaque element. Sur de gros volumes, le gain est typiquement de 10x a 100x. La contrepartie est une consommation memoire plus elevee, car les tableaux intermediaires sont materialises."
+  },
+  {
+    "instruction": "Explique la difference entre `is` et `==` en Python.",
+    "output": "`==` compare les valeurs (egalite logique, via la methode `__eq__`), tandis que `is` compare les identites : est-ce le meme objet en memoire, meme `id()`. Exemple : `[1,2] == [1,2]` vaut True (memes valeurs) mais `[1,2] is [1,2]` vaut False (deux objets distincts). On utilise `is` uniquement pour comparer a des singletons comme `None`, `True`, `False` : ecrire `if x is None:` et jamais `if x == None:`. Attention au piege du caching des petits entiers : `256 is 256` peut valoir True car CPython met en cache les entiers de -5 a 256, mais c'est un detail d'implementation sur lequel il ne faut jamais s'appuyer."
+  },
+  {
+    "instruction": "A quoi servent les generateurs et le mot-cle `yield` ?",
+    "output": "Un generateur est une fonction qui produit ses valeurs paresseusement (lazy), une a la fois, au lieu de tout construire en memoire. `yield` suspend l'execution en renvoyant une valeur, puis reprend au meme point a l'appel suivant. Avantage principal : l'empreinte memoire reste constante meme sur des flux enormes ou infinis. Exemple : `def lignes(f):\n    for l in f:\n        yield l.strip()` traite un fichier de plusieurs Go sans le charger entierement. Les generateurs sont a la base des pipelines de donnees efficaces et se composent bien avec `itertools`. On les consomme une seule fois : une fois epuises, il faut les recreer."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un decorateur en Python ?",
+    "output": "Un decorateur est une fonction qui prend une fonction (ou classe) et en retourne une version modifiee, sans changer son code source. La syntaxe `@deco` au-dessus d'une fonction equivaut a `f = deco(f)`. On les utilise pour ajouter un comportement transversal : logging, mesure de temps, cache (`functools.lru_cache`), controle d'acces, retry. Exemple minimal :\n```python\nimport functools\ndef timer(fn):\n    @functools.wraps(fn)\n    def wrapper(*args, **kwargs):\n        import time; t = time.perf_counter()\n        r = fn(*args, **kwargs)\n        print(f'{fn.__name__}: {time.perf_counter()-t:.3f}s')\n        return r\n    return wrapper\n```\n`functools.wraps` preserve le nom et la docstring de la fonction originale."
+  },
+  {
+    "instruction": "Explique le fonctionnement de `async`/`await` en Python.",
+    "output": "`async`/`await` permet la programmation asynchrone cooperative : une coroutine peut se mettre en pause a un point `await` pour laisser d'autres taches s'executer, le tout sur un seul thread via une boucle d'evenements (`asyncio`). C'est ideal pour les taches I/O-bound (requetes reseau, acces disque, appels API) ou l'on passe l'essentiel du temps a attendre. Exemple : lancer 100 requetes HTTP concurrentes avec `asyncio.gather` est bien plus rapide qu'en sequentiel, sans le cout des threads. Attention : cela n'accelere PAS le code CPU-bound, car tout tourne sur un seul coeur ; pour cela il faut du multiprocessing. Regle d'or : ne jamais bloquer la boucle avec du code synchrone lourd."
+  },
+  {
+    "instruction": "Quelle est la difference entre une liste et un tuple ?",
+    "output": "Une liste (`[]`) est mutable : on peut ajouter, supprimer, modifier ses elements. Un tuple (`()`) est immuable : une fois cree, il ne change plus. Consequences pratiques : (1) un tuple peut servir de cle de dictionnaire ou d'element de set car il est hashable, pas une liste ; (2) le tuple est legerement plus leger et rapide ; (3) l'immuabilite documente une intention, par exemple des coordonnees fixes. On choisit la liste pour une collection homogene amenee a evoluer, et le tuple pour un enregistrement heterogene et fixe. Note : un tuple contenant une liste reste immuable dans sa structure, mais la liste interne peut muter."
+  },
+  {
+    "instruction": "Qu'est-ce que le GIL (Global Interpreter Lock) et quel impact a-t-il ?",
+    "output": "Le GIL est un verrou global de CPython qui garantit qu'un seul thread execute du bytecode Python a la fois. Consequence : le multithreading n'accelere pas le code CPU-bound, car les threads ne s'executent pas vraiment en parallele. En revanche, il aide pour l'I/O-bound : le GIL est relache pendant les attentes reseau ou disque, donc les threads progressent en concurrence. Pour paralleliser du calcul, on utilise `multiprocessing` (plusieurs processus, chacun son interpreteur) ou des bibliotheques qui liberent le GIL comme NumPy. Note : Python 3.13 introduit un mode experimental sans GIL (free-threaded), mais il n'est pas encore le defaut."
+  },
+  {
+    "instruction": "Comment gerer proprement les exceptions en Python ?",
+    "output": "Principes : (1) attraper des exceptions specifiques, jamais un `except:` nu qui masque meme `KeyboardInterrupt` ; (2) garder le bloc `try` le plus petit possible ; (3) utiliser `finally` ou un context manager (`with`) pour liberer les ressources ; (4) preferer `raise ... from e` pour conserver la cause originale. Exemple :\n```python\ntry:\n    data = json.loads(text)\nexcept json.JSONDecodeError as e:\n    raise ValueError('JSON invalide') from e\n```\nEviter la logique de controle par exceptions quand un simple `if` suffit, mais suivre le principe EAFP (demander pardon plutot que permission) quand c'est plus lisible."
+  },
+  {
+    "instruction": "Pourquoi ne faut-il jamais utiliser une liste comme valeur par defaut d'un argument ?",
+    "output": "Parce que les valeurs par defaut sont evaluees UNE SEULE FOIS, a la definition de la fonction, pas a chaque appel. Une liste par defaut est donc partagee entre tous les appels et accumule les modifications :\n```python\ndef ajouter(x, cible=[]):   # PIEGE\n    cible.append(x); return cible\najouter(1)  # [1]\najouter(2)  # [1, 2] — surprise !\n```\nLa solution idiomatique est d'utiliser `None` comme sentinelle :\n```python\ndef ajouter(x, cible=None):\n    if cible is None: cible = []\n    cible.append(x); return cible\n```\nLe piege vaut pour tout objet mutable : listes, dictionnaires, sets, instances."
+  },
+  {
+    "instruction": "Que signifient `*args` et `**kwargs` ?",
+    "output": "`*args` collecte les arguments positionnels supplementaires dans un tuple, `**kwargs` collecte les arguments nommes supplementaires dans un dictionnaire. Ils permettent d'ecrire des fonctions a signature variable ou de faire suivre des arguments a une autre fonction :\n```python\ndef log_appel(fn, *args, **kwargs):\n    print(fn.__name__, args, kwargs)\n    return fn(*args, **kwargs)\n```\nA l'appel, l'etoile fait l'operation inverse : elle deballe une sequence ou un dictionnaire en arguments. Les noms `args` et `kwargs` sont une convention, seules les etoiles comptent. C'est le mecanisme de base des decorateurs et des wrappers."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un context manager et le mot-cle `with` ?",
+    "output": "Un context manager garantit qu'une ressource est correctement liberee, meme en cas d'exception. Le bloc `with` appelle `__enter__` a l'entree et `__exit__` a la sortie, quoi qu'il arrive. Exemple classique : `with open('f.txt') as f:` ferme le fichier automatiquement. On l'utilise aussi pour les connexions de base de donnees, les verrous, les transactions ou la mesure de temps. Le moyen le plus simple d'en creer un est le decorateur `contextlib.contextmanager` :\n```python\nfrom contextlib import contextmanager\n@contextmanager\ndef chrono():\n    t = time.perf_counter()\n    yield\n    print(time.perf_counter() - t)\n```\nLe code avant `yield` est l'entree, celui apres est la sortie."
+  },
+  {
+    "instruction": "Quelle est la difference entre copie superficielle et copie profonde ?",
+    "output": "Une copie superficielle (`copy.copy`, `list(x)`, `x[:]`) cree un nouvel objet mais reutilise les references vers les objets internes. Une copie profonde (`copy.deepcopy`) duplique recursivement tout l'arbre d'objets. La difference apparait avec des structures imbriquees :\n```python\na = [[1, 2], [3]]\nb = list(a)          # superficielle\nb[0].append(99)      # modifie AUSSI a[0]\n```\nAvec `deepcopy`, `a` resterait intact. La copie profonde est plus sure mais couteuse en temps et en memoire ; on ne l'utilise que lorsqu'on a reellement besoin d'independance totale. Pour des donnees immuables, la question ne se pose pas."
+  },
+  {
+    "instruction": "Pourquoi un dictionnaire ou un set sont-ils plus rapides qu'une liste pour tester l'appartenance ?",
+    "output": "Parce qu'ils reposent sur une table de hachage : la position d'un element est calculee directement a partir de son hash, ce qui donne une recherche en temps constant moyen, note O(1). Une liste, elle, doit parcourir ses elements un par un : c'est du O(n). Sur 1 million d'elements, `x in mon_set` est quasi instantane la ou `x in ma_liste` peut prendre des millisecondes, et la difference explose si le test est fait dans une boucle. Regle pratique : des qu'on teste l'appartenance de facon repetee, convertir la liste en set. Contrepartie : les elements doivent etre hashables (immuables) et l'ordre d'insertion n'est garanti que pour les dictionnaires depuis Python 3.7."
+  },
+  {
+    "instruction": "A quoi servent les annotations de type (type hints) en Python ?",
+    "output": "Les annotations de type documentent les types attendus des arguments et du retour : `def moyenne(xs: list[float]) -> float:`. Python ne les verifie PAS a l'execution : elles n'ont aucun cout et n'empechent rien. Leur valeur vient des outils : un verificateur statique comme mypy ou pyright detecte les incoherences avant l'execution, et les IDE offrent une bien meilleure autocompletion. Sur un projet qui grandit, elles servent de documentation toujours a jour et facilitent les refactorisations. Bonnes pratiques : annoter les frontieres publiques (fonctions exportees, signatures d'API) en priorite, et utiliser `Optional[X]` ou `X | None` pour les valeurs potentiellement nulles."
+  },
+  {
+    "instruction": "Quand utiliser une dataclass plutot qu'un dictionnaire ou une classe classique ?",
+    "output": "Une dataclass est adaptee quand on veut un conteneur de donnees structure et typé sans ecrire de boilerplate : le decorateur `@dataclass` genere `__init__`, `__repr__` et `__eq__` automatiquement. Comparee a un dictionnaire, elle apporte des champs explicites, l'autocompletion, la verification statique des types et empeche les fautes de frappe sur les cles. Comparee a une classe classique, elle evite une dizaine de lignes repetitives. On peut la rendre immuable avec `@dataclass(frozen=True)`, ce qui la rend hashable. On garde le dictionnaire pour des donnees vraiment dynamiques (cles inconnues a l'avance) et on passe a Pydantic quand il faut valider des donnees externes a l'execution."
+  },
+  {
+    "instruction": "Pourquoi utiliser le module `logging` plutot que `print` ?",
+    "output": "`print` ecrit systematiquement sur la sortie standard, sans contexte ni controle. Le module `logging` apporte : (1) des niveaux de gravite (DEBUG, INFO, WARNING, ERROR, CRITICAL) que l'on filtre sans modifier le code ; (2) des destinations multiples (console, fichier, service distant) via les handlers ; (3) des metadonnees automatiques (horodatage, module, numero de ligne) ; (4) une configuration centralisee, differente en developpement et en production. Dans une bibliotheque, on cree un logger par module avec `logger = logging.getLogger(__name__)` et on laisse l'application decider de la configuration. En production, un format structure comme le JSON facilite l'indexation et la recherche dans les logs."
+  },
+  {
+    "instruction": "Comment isoler les dependances d'un projet Python ?",
+    "output": "En creant un environnement virtuel par projet, ce qui evite les conflits de versions entre projets et garde l'interpreteur systeme propre. Avec l'outillage standard : `python -m venv .venv` puis activation. On declare ensuite les dependances dans `requirements.txt` ou, mieux, dans un `pyproject.toml`. Point crucial pour la reproductibilite : distinguer les dependances directes (ce que l'on demande) des versions resolues (ce qui est reellement installe, transitivement). Un fichier de verrouillage (lock file) fige l'ensemble et garantit que la meme installation sera obtenue demain ou sur une autre machine. Des outils modernes comme uv ou Poetry gerent les deux aspects et sont nettement plus rapides que pip seul."
+  },
+  {
+    "instruction": "Quelle est la difference entre `__str__` et `__repr__` ?",
+    "output": "`__str__` produit une representation lisible destinee a l'utilisateur final, utilisee par `print()` et `str()`. `__repr__` produit une representation technique destinee au developpeur, utilisee par la console interactive, le debogueur et l'affichage des objets dans une collection. La convention est que `__repr__` soit si possible non ambigu et ressemble a une expression permettant de recreer l'objet : `Point(x=1, y=2)`. Si une seule des deux methodes est definie, il vaut mieux que ce soit `__repr__`, car Python s'y rabat automatiquement quand `__str__` est absent. Un bon `__repr__` fait gagner un temps considerable au debogage."
+  },
+  {
+    "instruction": "Pourquoi preferer `pathlib` a `os.path` ?",
+    "output": "`pathlib` offre une API orientee objet plus lisible et portable que les fonctions de chaines de `os.path`. La composition de chemins utilise l'operateur `/`, naturel a lire : `Path('data') / 'raw' / 'f.json'` remplace `os.path.join('data', 'raw', 'f.json')`. Les operations courantes deviennent des methodes de l'objet : `p.exists()`, `p.mkdir(parents=True, exist_ok=True)`, `p.read_text()`, `p.suffix`, `p.stem`, `p.glob('*.csv')`. Le meme code fonctionne sous Windows et Unix car la gestion des separateurs est interne. `pathlib` est dans la bibliotheque standard depuis Python 3.4 et la plupart des fonctions acceptant un chemin acceptent desormais un objet `Path`."
+  },
+  {
+    "instruction": "Qu'apporte le module `itertools` pour traiter de gros volumes de donnees ?",
+    "output": "`itertools` fournit des briques d'iteration paresseuses, ecrites en C, que l'on compose pour former des pipelines a memoire constante. Les plus utiles : `islice` pour prendre une tranche sans materialiser, `chain` pour concatener des sources, `groupby` pour regrouper des elements consecutifs, `batched` (Python 3.12) pour decouper en lots, `product` et `combinations` pour l'exploration combinatoire. L'interet est de traiter un flux de plusieurs Go sans jamais le charger en memoire : chaque element traverse le pipeline individuellement. Combine a des generateurs personnalises, cela permet d'ecrire du code a la fois concis et econome, la la ou une approche par listes intermediaires saturerait la RAM."
+  }
+]

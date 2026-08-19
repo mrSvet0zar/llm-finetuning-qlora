@@ -1,0 +1,74 @@
+[
+  {
+    "instruction": "Quelle est la difference entre `.loc` et `.iloc` dans Pandas ?",
+    "output": "`.loc` selectionne par etiquette (label) : noms de colonnes et valeurs d'index. `.iloc` selectionne par position entiere (0-based), comme les listes Python. Exemple : sur un DataFrame indexe par des dates, `df.loc['2024-01-01']` cible la ligne portant cette etiquette, alors que `df.iloc[0]` cible la premiere ligne quelle que soit son etiquette. Piege classique : avec `.loc`, les slices sont INCLUSIFS des deux bornes (`df.loc['a':'c']` inclut 'c'), alors qu'avec `.iloc` la borne de fin est exclue comme en Python standard. Utiliser `.loc` par defaut pour un code robuste au reordonnancement, et `.iloc` quand la position compte vraiment."
+  },
+  {
+    "instruction": "Comment eviter le warning `SettingWithCopyWarning` dans Pandas ?",
+    "output": "Ce warning signale une modification ambigue : Pandas ne sait pas si l'on modifie une copie ou la vue originale (chained indexing). La cause typique est `df[df.a > 0]['b'] = 1`, qui peut ne rien modifier du tout. La solution est d'utiliser une indexation unique avec `.loc` : `df.loc[df.a > 0, 'b'] = 1`. Si l'on veut volontairement travailler sur une copie independante, il faut etre explicite avec `.copy()` : `sous = df[df.a > 0].copy()`. Regle generale : eviter le double crochet successif en assignation. A partir de Pandas 3.0, le mode Copy-on-Write devient le defaut et rend ce comportement previsible."
+  },
+  {
+    "instruction": "Qu'est-ce que le broadcasting en NumPy ?",
+    "output": "Le broadcasting est le mecanisme qui permet a NumPy d'appliquer des operations entre tableaux de formes differentes sans copier explicitement les donnees. NumPy etire virtuellement les dimensions de taille 1 pour les faire correspondre. Exemple : ajouter un vecteur de forme (3,) a une matrice (4,3) ajoute le vecteur a chaque ligne. Regles : on aligne les formes par la droite ; deux dimensions sont compatibles si elles sont egales ou si l'une vaut 1. Interet : un code concis et rapide, sans boucle ni materialisation d'un gros tableau intermediaire. Cas d'usage frequent : centrer des donnees en soustrayant `X.mean(axis=0)` a une matrice `X`."
+  },
+  {
+    "instruction": "Comment optimiser la memoire d'un gros DataFrame Pandas ?",
+    "output": "Leviers principaux : (1) sous-typer les colonnes numeriques (`int64` vers `int32`/`int16`, `float64` vers `float32`) avec `pd.to_numeric(..., downcast=...)` ; (2) convertir les colonnes de chaines a faible cardinalite en `category`, ce qui remplace les chaines repetees par des codes entiers ; (3) charger seulement les colonnes utiles (`usecols`) et par morceaux (`chunksize`) ; (4) preferer des formats colonnaires comme Parquet a CSV. On mesure l'impact avec `df.info(memory_usage='deep')`. Sur des jeux vraiment volumineux, envisager Polars ou Dask qui gerent le out-of-core et le multithreading nativement."
+  },
+  {
+    "instruction": "Quelle est la difference entre `apply`, `map` et les operations vectorisees dans Pandas ?",
+    "output": "Les operations vectorisees (`df['a'] + df['b']`, methodes `.str`, `.dt`) sont les plus rapides : elles s'executent en code compile. `map` s'applique element par element sur une Series, utile pour un mapping via dictionnaire ou une petite fonction. `apply` est le plus flexible (fonction arbitraire, sur lignes ou colonnes) mais aussi le plus lent car il boucle en Python. Hierarchie de choix : chercher d'abord une operation vectorisee native, sinon `map`/`replace` pour un remplacement, et `apply` seulement en dernier recours. Eviter `apply(axis=1)` sur de gros DataFrames : c'est souvent 10 a 100 fois plus lent qu'une reecriture vectorisee."
+  },
+  {
+    "instruction": "Comment fusionner deux DataFrames et quels types de jointures existent ?",
+    "output": "On utilise `pd.merge(gauche, droite, on='cle', how=...)`. Les types de `how` : 'inner' (seulement les cles presentes des deux cotes, defaut), 'left' (toutes les lignes de gauche), 'right' (toutes celles de droite), 'outer' (union des cles). Bonnes pratiques : verifier la cardinalite avec `validate='one_to_many'` pour attraper les doublons inattendus qui font exploser le nombre de lignes ; controler les valeurs manquantes generees par une jointure externe ; utiliser `indicator=True` pour savoir d'ou vient chaque ligne. Pour joindre sur l'index, `df.join()` est plus concis que `merge`."
+  },
+  {
+    "instruction": "Comment fonctionne `groupby` dans Pandas ?",
+    "output": "`groupby` applique le schema split-apply-combine : on decoupe le DataFrame selon les valeurs d'une ou plusieurs colonnes, on applique une fonction a chaque groupe, puis on recombine les resultats. Exemple : `df.groupby('ville')['prix'].mean()`. On peut agreger plusieurs colonnes et plusieurs fonctions d'un coup avec `.agg({'prix': ['mean', 'max'], 'qte': 'sum'})`. Trois variantes a distinguer : `agg` reduit chaque groupe a une valeur, `transform` renvoie un resultat de meme taille que l'entree (pratique pour normaliser par groupe), et `filter` conserve ou rejette des groupes entiers. Preferer les agregations natives aux `apply` personnalises, nettement plus lents."
+  },
+  {
+    "instruction": "Comment gerer les valeurs manquantes dans un DataFrame ?",
+    "output": "D'abord les quantifier : `df.isna().sum()` et `df.isna().mean()` donnent le nombre et la proportion par colonne. Ensuite, le choix depend de la cause. Supprimer (`dropna`) convient si les manquants sont rares et aleatoires. Imputer (`fillna`) avec la mediane, la moyenne ou le mode est courant pour les variables numeriques ; pour des series temporelles, `ffill` ou une interpolation respectent la continuite. Point critique en ML : l'imputation doit etre apprise sur le TRAIN uniquement puis appliquee au test, via un `SimpleImputer` dans un Pipeline scikit-learn, sinon on cree une fuite de donnees. Il est aussi souvent utile d'ajouter une colonne indicatrice signalant que la valeur etait manquante."
+  },
+  {
+    "instruction": "Quelle est la difference entre une vue et une copie en NumPy ?",
+    "output": "Une vue partage la memoire du tableau d'origine : modifier la vue modifie l'original. Une copie possede sa propre memoire et est independante. Le slicing de base produit une VUE (`b = a[2:5]`), ce qui est tres economique mais surprenant si l'on ne s'y attend pas. En revanche, l'indexation dite avancee (par liste d'indices ou par masque booleen) produit toujours une COPIE. On force une copie avec `a[2:5].copy()` et on verifie le lien avec l'attribut `.base`, qui vaut `None` pour un tableau proprietaire de ses donnees. Cette distinction explique de nombreux bugs de modification inattendue, mais c'est aussi ce qui rend NumPy rapide et econome."
+  },
+  {
+    "instruction": "A quoi sert `pivot_table` et en quoi differe-t-elle de `pivot` ?",
+    "output": "`pivot_table` reorganise un DataFrame du format long vers le format large : on choisit ce qui devient les lignes (`index`), les colonnes (`columns`) et les valeurs (`values`), avec une fonction d'agregation (`aggfunc`, par defaut la moyenne). C'est l'equivalent des tableaux croises dynamiques d'un tableur. `pivot` fait la meme reorganisation mais N'AGREGE PAS : il echoue si plusieurs lignes partagent la meme combinaison index/colonne. En pratique, on utilise `pivot` quand les donnees sont deja uniques, et `pivot_table` des qu'il faut resumer des doublons. L'operation inverse, qui repasse du large au long, est `melt`."
+  },
+  {
+    "instruction": "Comment lire efficacement un fichier CSV trop volumineux pour la memoire ?",
+    "output": "Plusieurs strategies se combinent. D'abord ne charger que le necessaire : `usecols` pour restreindre les colonnes et `dtype` pour imposer des types compacts des la lecture, ce qui evite l'inference couteuse en `object`. Ensuite traiter par morceaux avec `chunksize`, qui renvoie un iterateur de DataFrames : on agrege chaque morceau et on ne conserve que le resultat. Si le fichier doit etre relu souvent, le convertir une fois en Parquet divise la taille et accelere fortement les lectures suivantes. Enfin, pour un jeu qui depasse durablement la RAM, passer a Polars (execution paresseuse et streaming) ou Dask (partitionnement et parallelisme) est plus pertinent que d'optimiser Pandas indefiniment."
+  },
+  {
+    "instruction": "Pourquoi eviter de construire un DataFrame en concatenant ligne par ligne dans une boucle ?",
+    "output": "Parce que chaque `concat` ou `append` cree un NOUVEAU DataFrame et recopie integralement les donnees existantes. Le cout total devient quadratique : ajouter n lignes coute de l'ordre de n au carre operations, ce qui rend le traitement de quelques dizaines de milliers de lignes insupportablement lent. La bonne pratique est d'accumuler les lignes dans une liste Python (ajout en temps constant), puis de construire le DataFrame une seule fois a la fin : `pd.DataFrame(lignes)`. Si les donnees viennent de plusieurs sources, on collecte les DataFrames dans une liste et on appelle `pd.concat(liste)` UNE fois. Ce schema collecte-puis-construit vaut aussi pour les tableaux NumPy."
+  },
+  {
+    "instruction": "Que fait `np.where` et quand l'utiliser ?",
+    "output": "`np.where(condition, valeur_si_vrai, valeur_si_faux)` construit un tableau en choisissant element par element selon une condition booleenne, de facon entierement vectorisee. C'est l'equivalent d'un if/else applique a tout un tableau sans boucle : `np.where(df['age'] >= 18, 'majeur', 'mineur')`. On peut imbriquer les appels pour plusieurs cas, mais au-dela de deux ou trois niveaux, `np.select` avec une liste de conditions est bien plus lisible. Dans Pandas, l'equivalent idiomatique pour un mapping conditionnel complexe est souvent `Series.mask` ou `Series.clip`. Appele avec un seul argument, `np.where(condition)` renvoie les INDICES des elements vrais, ce qui est un usage different et frequent."
+  },
+  {
+    "instruction": "Comment travailler avec des dates dans Pandas ?",
+    "output": "La premiere etape est de convertir explicitement la colonne avec `pd.to_datetime`, en precisant `format` quand c'est possible : l'inference automatique est lente et parfois ambigue entre les formats jour/mois. Une fois la colonne en `datetime64`, l'accesseur `.dt` donne acces aux composantes (`.dt.year`, `.dt.dayofweek`, `.dt.month`) pour construire des variables explicatives. Placer les dates en index permet le slicing temporel (`df['2024-03']`) et surtout le reechantillonnage avec `resample('D').sum()` pour agreger par jour, semaine ou mois. Attention aux fuseaux horaires : on rend une serie consciente du fuseau avec `tz_localize` puis on la convertit avec `tz_convert`, faute de quoi les comparaisons entre series naives et conscientes echouent."
+  },
+  {
+    "instruction": "Quelle est la difference entre `np.array` et une liste Python ?",
+    "output": "Un tableau NumPy est homogene (un seul dtype), de taille fixe et stocke de facon contigue en memoire ; une liste Python est heterogene, redimensionnable, et stocke des pointeurs vers des objets disperses. Consequences : le tableau consomme bien moins de memoire (pas d'objet Python par element), autorise les operations vectorisees et les instructions SIMD, et supporte le multidimensionnel avec des operations d'algebre lineaire natives. La liste reste preferable quand on ajoute et retire frequemment des elements, ou quand les types sont melanges. En pratique, on utilise les listes pour la logique applicative et les tableaux NumPy des que l'on fait du calcul numerique sur des volumes significatifs."
+  },
+  {
+    "instruction": "A quoi sert l'argument `axis` dans NumPy et Pandas ?",
+    "output": "`axis` designe la dimension le long de laquelle l'operation est effectuee, et c'est une source classique de confusion. La bonne intuition est que `axis` indique la dimension qui est CONSOMMEE par la reduction. Sur un DataFrame, `axis=0` parcourt les lignes et produit donc un resultat par colonne : `df.mean(axis=0)` donne la moyenne de chaque colonne. `axis=1` parcourt les colonnes et produit un resultat par ligne. Les alias `axis='index'` et `axis='columns'` sont plus explicites et rendent le code plus lisible. Meme logique en NumPy : sur un tableau de forme (4,3), `sum(axis=0)` donne un vecteur de taille 3, et `sum(axis=1)` un vecteur de taille 4."
+  },
+  {
+    "instruction": "Comment detecter et supprimer les doublons dans un DataFrame ?",
+    "output": "`df.duplicated()` renvoie un masque booleen marquant les lignes deja vues, et `df.drop_duplicates()` les supprime. Deux parametres comptent : `subset` restreint la comparaison a certaines colonnes, ce qui est indispensable quand une cle metier definit l'unicite mais que d'autres colonnes varient ; `keep` choisit quelle occurrence conserver ('first', 'last', ou False pour supprimer toutes les occurrences dupliquees). En pratique on inspecte d'abord les doublons avant de les supprimer, car ils revelent souvent un probleme en amont : jointure mal cardinalisee, ingestion executee deux fois. En machine learning, la deduplication doit avoir lieu AVANT le decoupage train/test, sinon des quasi-doublons se retrouvent des deux cotes et faussent l'evaluation."
+  },
+  {
+    "instruction": "Comment normaliser ou standardiser des donnees numeriques ?",
+    "output": "La standardisation (z-score) centre et reduit : on soustrait la moyenne et on divise par l'ecart-type, ce qui donne une distribution de moyenne 0 et d'ecart-type 1. La normalisation min-max ramene lineairement les valeurs dans un intervalle, typiquement [0,1]. On standardise par defaut pour les modeles sensibles a l'echelle : regressions regularisees, SVM, k-means, reseaux de neurones, ACP. On prefere le min-max quand une borne fixe est requise, par exemple pour des pixels d'image. Si la variable contient des valeurs extremes, un `RobustScaler` fonde sur la mediane et l'ecart interquartile est plus stable. Regle absolue : ajuster le scaler sur le TRAIN seulement, puis transformer le test, de preference via un Pipeline scikit-learn."
+  }
+]

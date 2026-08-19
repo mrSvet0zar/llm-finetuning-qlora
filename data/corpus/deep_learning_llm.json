@@ -1,0 +1,98 @@
+[
+  {
+    "instruction": "Qu'est-ce que le fine-tuning et en quoi differe-t-il du RAG ?",
+    "output": "Le fine-tuning ajuste les poids d'un modele pre-entraine sur un jeu de donnees specifique pour lui inculquer un style, un format ou un savoir-faire. Le RAG (Retrieval-Augmented Generation) laisse le modele intact mais lui fournit, au moment de l'inference, des documents pertinents recuperes dans une base externe. Difference : le fine-tuning modifie le comportement, le COMMENT ; le RAG apporte des connaissances factuelles a jour, le QUOI. On fine-tune pour un ton, un format de sortie ou une tache recurrente ; on utilise le RAG pour des faits qui changent souvent ou une base documentaire volumineuse. Les deux sont complementaires et se combinent tres bien."
+  },
+  {
+    "instruction": "Explique ce qu'est LoRA et pourquoi c'est efficace.",
+    "output": "LoRA (Low-Rank Adaptation) est une methode de fine-tuning parametre-efficace. Au lieu de mettre a jour toute une matrice de poids W, on la gele et on apprend une petite correction de rang faible : delta_W = B @ A, ou A et B sont deux matrices bien plus petites de rang r, typiquement 8 a 64. Seuls A et B sont entraines, soit souvent moins de 1 % des parametres. Avantages : beaucoup moins de memoire et de calcul, des adaptateurs legers de quelques dizaines de Mo que l'on peut echanger a volonte, et une base partagee entre plusieurs taches. L'hypothese sous-jacente est que l'adaptation a une tache vit dans un sous-espace de faible dimension. A l'inference, on peut fusionner delta_W dans W sans surcout."
+  },
+  {
+    "instruction": "Qu'est-ce que la quantization 4-bit et QLoRA ?",
+    "output": "La quantization reduit la precision des poids, par exemple de 16 a 4 bits, ce qui divise l'empreinte memoire par environ 4 au prix d'une legere perte de precision. QLoRA combine deux idees : (1) charger le modele de base quantise en 4-bit au format NF4, optimise pour des poids distribues normalement, et le geler ; (2) entrainer par-dessus des adaptateurs LoRA en precision plus haute. Deux astuces completent le dispositif : la double quantization compresse aussi les constantes de quantization, et un optimiseur pagine absorbe les pics memoire. Resultat : on peut fine-tuner un modele de plusieurs milliards de parametres sur un seul GPU grand public, ce qui etait impossible en pleine precision."
+  },
+  {
+    "instruction": "Comment fonctionne le mecanisme d'attention dans un Transformer ?",
+    "output": "L'attention permet a chaque token de ponderer l'importance des autres tokens pour construire sa representation. Chaque token produit trois vecteurs : une Query (ce qu'il cherche), une Key (ce qu'il offre) et une Value (l'information a transmettre). On calcule des scores par produit scalaire Query-Key, on les normalise par softmax apres division par la racine de la dimension pour stabiliser, puis on fait une moyenne ponderee des Values. La multi-head attention repete ce procede en parallele sur plusieurs sous-espaces pour capter differents types de relations. C'est ce qui donne au Transformer sa capacite a modeliser des dependances a longue portee et a paralleliser le calcul sur toute la sequence."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un embedding et a quoi ca sert ?",
+    "output": "Un embedding est une representation vectorielle dense d'un objet (mot, phrase, image, utilisateur) dans un espace continu ou la proximite geometrique reflete une similarite semantique. Au lieu de traiter les mots comme des symboles isoles, on les place dans un espace ou des concepts proches sont voisins. Utilite : recherche semantique, clustering, recommandation, et surtout entree des reseaux de neurones qui operent sur des vecteurs. Dans un systeme RAG, on encode documents et requetes en embeddings puis on recupere les documents dont l'embedding est le plus proche, souvent par similarite cosinus. Les embeddings modernes sont produits par des modeles dedies et capturent un contexte riche."
+  },
+  {
+    "instruction": "Quelle est la difference entre les parametres temperature et top_p en generation ?",
+    "output": "Les deux controlent le hasard de l'echantillonnage, mais differemment. La temperature reechelonne la distribution des probabilites avant l'echantillonnage : proche de 0, la sortie devient quasi deterministe ; au-dela de 1, elle devient plus aleatoire et creative. Le top_p, ou nucleus sampling, restreint le choix au plus petit ensemble de tokens dont la probabilite cumulee atteint p, par exemple 0,9, ce qui elimine la longue traine improbable. En pratique on ajuste souvent l'un ou l'autre : temperature autour de 0,7 et top_p autour de 0,9 pour un bon compromis, ou temperature tres basse pour des taches factuelles comme la generation de code ou l'extraction d'information."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un token et pourquoi le nombre de tokens compte-t-il ?",
+    "output": "Un token est l'unite de base traitee par un LLM : souvent un morceau de mot, pas necessairement un mot entier. Un tokenizer, typiquement de type BPE, decoupe le texte selon un vocabulaire appris ; en anglais, un token vaut environ 4 caracteres, soit environ 0,75 mot. Le nombre de tokens compte pour trois raisons : la fenetre de contexte est limitee, entree et sortie confondues ; la facturation des API se fait au token ; et le cout de calcul de l'attention croit avec la longueur de sequence. D'ou l'importance de prompts concis et, pour l'entrainement, d'un `max_seq_length` bien choisi pour equilibrer couverture et memoire."
+  },
+  {
+    "instruction": "Pourquoi masque-t-on le prompt lors du calcul de la loss en fine-tuning instruct ?",
+    "output": "En fine-tuning d'instruction, on veut apprendre au modele a GENERER la reponse, pas a reproduire la question qu'on lui a deja fournie. On met donc les labels des tokens du prompt, instruction systeme et question utilisateur, a -100, valeur ignoree par la cross-entropy de PyTorch, de sorte que seule la partie reponse contribue au gradient. Sans ce masquage, le modele depense de la capacite a modeliser les questions, ce qui dilue le signal utile et peut degrader la qualite des reponses. En pratique, on construit la sequence complete via le chat template, puis on masque tout ce qui precede le debut du tour de l'assistant."
+  },
+  {
+    "instruction": "Qu'est-ce que le gradient checkpointing et quel est son compromis ?",
+    "output": "Le gradient checkpointing est une technique d'economie de memoire pendant l'entrainement. Normalement, on stocke toutes les activations de la passe avant pour calculer les gradients a la passe arriere. Avec le checkpointing, on n'en conserve que quelques-unes, les points de controle, et on RECALCULE les autres a la volee pendant la retropropagation. Le compromis est clair : on echange du temps de calcul, environ 20 a 30 % de plus a cause d'une passe avant supplementaire, contre une forte reduction de la memoire d'activation, souvent 60 a 70 %. C'est indispensable pour entrainer de gros modeles sur un GPU a memoire limitee."
+  },
+  {
+    "instruction": "Qu'est-ce que le batch effectif et le gradient accumulation ?",
+    "output": "Le batch effectif est le nombre reel d'exemples qui contribuent a une mise a jour des poids. Quand la memoire GPU ne permet pas un grand batch, on utilise l'accumulation de gradient : on effectue plusieurs micro-batchs, on additionne leurs gradients, et on ne met a jour les poids qu'apres N micro-batchs. Le batch effectif vaut alors la taille du micro-batch multipliee par le nombre de pas d'accumulation et par le nombre de GPU. Interet : simuler un grand batch, donc un entrainement plus stable, sans depasser la VRAM. Compromis : c'est un peu plus lent, car les mises a jour sont moins frequentes pour un meme nombre d'exemples traites."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un chat template et pourquoi doit-il correspondre au modele ?",
+    "output": "Un chat template est le format exact dans lequel on serialise une conversation en texte avant tokenisation : marqueurs de debut et de fin de tour, roles systeme, utilisateur et assistant. Chaque famille de modeles a le sien : ChatML avec des balises im_start pour Qwen, des balises INST pour Mistral, un format a en-tetes pour Llama 3. Utiliser le mauvais template degrade fortement les performances, car le modele a ete entraine a reconnaitre des delimiteurs precis : il ne sait plus ou commence la reponse attendue. En pratique, on n'ecrit jamais ces balises a la main : on appelle `tokenizer.apply_chat_template`, qui utilise le template stocke dans le tokenizer du modele."
+  },
+  {
+    "instruction": "Qu'est-ce que le catastrophic forgetting lors d'un fine-tuning ?",
+    "output": "L'oubli catastrophique designe la perte de capacites generales d'un modele quand on le specialise trop agressivement sur un domaine etroit : il devient bon sur la nouvelle tache mais regresse sur ce qu'il savait faire auparavant. Les causes typiques sont un learning rate eleve, un trop grand nombre d'epochs, un jeu de donnees peu diversifie ou une mise a jour de tous les poids. Les parades : preferer un fine-tuning parametre-efficace comme LoRA, qui gele le modele de base et limite mecaniquement la derive ; reduire le learning rate et le nombre d'epochs ; melanger des donnees generales aux donnees specialisees ; et surtout evaluer sur un jeu de reference general en plus du jeu specialise, pour detecter la regression."
+  },
+  {
+    "instruction": "Quelle est la difference entre pre-entrainement, fine-tuning supervise et RLHF ?",
+    "output": "Ce sont les trois etapes classiques de fabrication d'un assistant. Le pre-entrainement est auto-supervise sur d'enormes corpus de texte, avec pour seul objectif de predire le token suivant : le modele acquiert la langue et des connaissances generales, mais ne sait pas suivre des instructions. Le fine-tuning supervise, ou SFT, utilise des paires instruction-reponse de qualite pour lui apprendre le format conversationnel et l'obeissance aux consignes. L'alignement par renforcement, RLHF ou son alternative plus simple DPO, exploite des preferences humaines entre reponses pour affiner l'utilite, l'honnetete et l'innocuite. Le cout decroit fortement d'une etape a l'autre : des millions d'euros pour la premiere, quelques euros pour un LoRA de SFT."
+  },
+  {
+    "instruction": "Que sont les hallucinations d'un LLM et comment les limiter ?",
+    "output": "Une hallucination est une affirmation fluide et plausible mais fausse ou inventee. Elle decoule directement du fonctionnement du modele, qui optimise la vraisemblance du texte et non sa veracite : il produit toujours une suite probable, meme sans connaissance reelle du sujet. Les leviers de reduction : ancrer la generation dans des sources verifiables via un systeme RAG et demander des citations ; abaisser la temperature pour les taches factuelles ; autoriser explicitement le modele a repondre qu'il ne sait pas ; decomposer les questions complexes ; et verifier automatiquement les affirmations critiques en aval. Il faut retenir qu'aucune methode ne les elimine totalement : sur un usage sensible, une verification humaine reste necessaire."
+  },
+  {
+    "instruction": "Qu'est-ce que la fenetre de contexte d'un LLM ?",
+    "output": "La fenetre de contexte est le nombre maximal de tokens que le modele peut traiter en une fois, prompt et reponse generee compris. Au-dela, il faut tronquer, resumer ou decouper l'entree. Sa taille est limitee par deux facteurs : le cout de l'attention, qui croit quadratiquement avec la longueur, et la facon dont les positions ont ete encodees a l'entrainement. Des techniques comme les positions rotatives RoPE et leur interpolation permettent d'etendre la fenetre au-dela de la longueur vue en entrainement. Attention toutefois : une grande fenetre annoncee ne garantit pas une bonne exploitation ; les modeles souffrent souvent du phenomene dit lost in the middle, ou l'information placee au centre d'un tres long contexte est moins bien utilisee."
+  },
+  {
+    "instruction": "Qu'est-ce que le KV cache et pourquoi accelere-t-il la generation ?",
+    "output": "Lors de la generation autoregressive, le modele produit un token a la fois, et chaque nouveau token doit attendre au contexte precedent. Sans optimisation, il faudrait recalculer les Keys et Values de tous les tokens anterieurs a chaque pas, ce qui serait quadratique. Le KV cache memorise ces Keys et Values deja calculees : a chaque nouveau pas, on ne calcule que celles du dernier token et on reutilise le reste. Le gain de vitesse est considerable. Le cout est memoire : le cache croit lineairement avec la longueur de sequence et le nombre de sequences simultanees, et il devient souvent le facteur limitant en service. C'est precisement ce que le PagedAttention de vLLM optimise, en gerant ce cache par blocs comme une memoire virtuelle."
+  },
+  {
+    "instruction": "Quelle est la difference entre un modele de base et un modele instruct ?",
+    "output": "Un modele de base, dit base ou foundation, sort du pre-entrainement : il ne sait que continuer du texte de facon plausible. Pose-lui une question et il produira souvent d'autres questions similaires, car c'est la continuation la plus probable dans son corpus. Un modele instruct a subi un fine-tuning supervise puis souvent un alignement par preferences : il repond aux consignes, respecte un format conversationnel et refuse certaines demandes. Consequences pratiques : pour un assistant, on part d'un modele instruct, plus proche de l'usage cible et donc plus economique a specialiser ; pour un fine-tuning tres lourd sur un domaine tres eloigne, partir du modele de base peut eviter d'avoir a defaire un alignement existant."
+  },
+  {
+    "instruction": "Comment choisir le rang r et le parametre alpha dans LoRA ?",
+    "output": "Le rang r fixe la capacite de l'adaptateur : plus il est grand, plus la correction apprise peut etre expressive, mais plus le risque de sur-apprentissage et le cout memoire augmentent. Les valeurs usuelles vont de 8 a 64 ; on commence souvent a 16. Alpha est un facteur d'echelle : la contribution effective de l'adaptateur est proportionnelle a alpha divise par r. La convention repandue est de prendre alpha egal a deux fois r, ce qui maintient une echelle stable quand on fait varier r. En pratique, le choix des modules cibles compte souvent plus que la valeur exacte de r : cibler toutes les projections d'attention et du MLP donne de meilleurs resultats que se limiter aux projections Query et Value."
+  },
+  {
+    "instruction": "Qu'est-ce que la distillation de modeles ?",
+    "output": "La distillation transfere le savoir-faire d'un grand modele, dit enseignant, vers un modele plus petit, dit eleve. Plutot que d'entrainer l'eleve uniquement sur les etiquettes dures du jeu de donnees, on l'entraine a reproduire les sorties de l'enseignant. Les distributions de probabilite completes de l'enseignant, appelees soft targets, sont plus riches qu'une simple etiquette, car elles encodent les similarites percues entre classes ou entre tokens. Pour les LLM, la forme la plus courante consiste a faire generer par un modele puissant un corpus de reponses de haute qualite, puis a fine-tuner un petit modele dessus. Interet : un modele bien plus rapide et economique a servir, avec une perte de qualite limitee sur le domaine vise. Attention aux licences des modeles enseignants."
+  },
+  {
+    "instruction": "Qu'est-ce que le prompt engineering et quand suffit-il ?",
+    "output": "Le prompt engineering consiste a formuler l'entree pour obtenir le comportement voulu sans modifier les poids : role systeme explicite, consignes precises, exemples few-shot, format de sortie impose, decomposition du raisonnement en etapes. Il suffit dans beaucoup de cas, et c'est presque toujours la bonne premiere tentative, car il ne coute ni entrainement ni infrastructure et s'itere en quelques secondes. On passe au fine-tuning quand : le prompt devient tres long et donc couteux a chaque appel ; le style ou le format doivent etre absolument reguliers ; la tache est repetitive et a fort volume ; ou l'on veut la qualite d'un gros modele avec la latence d'un petit. Methodologiquement, il faut toujours mesurer la baseline few-shot avant de conclure qu'un fine-tuning est necessaire."
+  },
+  {
+    "instruction": "Qu'est-ce que la loss de cross-entropy dans un modele de langage ?",
+    "output": "A chaque position, le modele produit une distribution de probabilite sur tout le vocabulaire pour le token suivant. La cross-entropy mesure l'ecart entre cette distribution predite et la realite, c'est-a-dire le token effectivement observe : elle vaut l'oppose du logarithme de la probabilite attribuee au bon token. Elle est nulle si le modele attribue une certitude au bon token, et croit fortement quand il lui donne une faible probabilite, ce qui penalise durement les erreurs confiantes. On moyenne cette valeur sur tous les tokens non masques du batch pour obtenir la loss d'entrainement. Son exponentielle est la perplexite, plus intuitive a interpreter. En fine-tuning instruct, seuls les tokens de la reponse entrent dans cette moyenne."
+  },
+  {
+    "instruction": "Pourquoi utilise-t-on le format bfloat16 plutot que float16 pour entrainer ?",
+    "output": "Les deux occupent 16 bits, mais repartissent differemment exposant et mantisse. Le float16 offre plus de precision relative mais une plage dynamique etroite, ce qui provoque des depassements vers zero ou vers l'infini sur des gradients tres petits ou tres grands ; il exige donc une mise a l'echelle dynamique de la loss pour rester stable. Le bfloat16 conserve la meme plage d'exposant que le float32 au prix d'une mantisse plus courte : il perd en precision fine mais devient beaucoup plus robuste aux debordements, ce qui simplifie l'entrainement et evite le loss scaling. Il est supporte materiellement a partir des GPU Ampere, donc sur les cartes RTX 30xx et 40xx, ce qui en fait le choix par defaut aujourd'hui."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un optimiseur pagine (paged optimizer) ?",
+    "output": "Un optimiseur comme AdamW conserve, pour chaque parametre entraine, des etats supplementaires : moyenne mobile du gradient et de son carre. Ces etats occupent plusieurs fois la taille des parametres et provoquent des pics de memoire GPU, notamment lors des sequences longues. Un optimiseur pagine, introduit avec QLoRA, s'appuie sur la memoire unifiee de CUDA pour deplacer automatiquement ces etats entre la VRAM et la RAM systeme lorsque la memoire graphique sature, exactement comme un systeme d'exploitation pagine vers le disque. Combine a une quantization des etats sur 8 bits, cela evite les erreurs de memoire insuffisante sur les cartes limitees, au prix d'un leger ralentissement lors des transferts."
+  },
+  {
+    "instruction": "Pourquoi fusionner un adaptateur LoRA change-t-il la latence d'inference ?",
+    "output": "Tant que l'adaptateur reste separe, chaque couche ciblee effectue un calcul supplementaire : en plus du produit par la matrice gelee W, elle calcule la correction de rang faible en passant par les deux petites matrices A et B, puis additionne les resultats. Cela ajoute des operations et surtout des lancements de noyaux GPU, ce qui coute quelques pourcents de latence. La fusion calcule une fois pour toutes W plus delta_W et ecrit le resultat dans les poids : le modele redevient un Transformer standard, sans surcout ni dependance a PEFT au moment de l'inference. Le prix a payer est la perte de modularite, puisqu'on ne peut plus echanger l'adaptateur, et un fichier de poids complet a stocker."
+  }
+]

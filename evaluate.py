@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -42,28 +43,52 @@ def load_test(cfg: Config) -> list[dict]:
     return data
 
 
-def compute_metrics(predictions: list[str], references: list[str]) -> dict:
+def _per_example_rouge(predictions: list[str], references: list[str]) -> list[dict]:
+    """Scores ROUGE par exemple (necessaires pour le bootstrap)."""
     scorer = rouge_scorer.RougeScorer(
         ["rouge1", "rouge2", "rougeL"], use_stemmer=True,
     )
-    r1 = r2 = rl = 0.0
+    out = []
     for pred, ref in zip(predictions, references):
         s = scorer.score(ref, pred)
-        r1 += s["rouge1"].fmeasure
-        r2 += s["rouge2"].fmeasure
-        rl += s["rougeL"].fmeasure
-    n = max(len(predictions), 1)
+        out.append({k: s[k].fmeasure for k in ("rouge1", "rouge2", "rougeL")})
+    return out
 
-    # BLEU au niveau du corpus (sacrebleu)
-    bleu = sacrebleu.corpus_bleu(predictions, [references]).score
 
-    return {
-        "rouge1": r1 / n,
-        "rouge2": r2 / n,
-        "rougeL": rl / n,
-        "bleu": bleu,
-        "n_samples": len(predictions),
-    }
+def compute_metrics(predictions: list[str], references: list[str],
+                    n_bootstrap: int = 1000, seed: int = 42) -> dict:
+    """Metriques ponctuelles + intervalles de confiance a 95 % par bootstrap.
+
+    Sur un jeu de test de quelques dizaines d'exemples, un score isole n'est
+    qu'une estimation bruitee. On reechantillonne le jeu avec remise pour
+    estimer la dispersion : si les intervalles de deux modeles se recouvrent
+    largement, la difference observee n'est pas etablie.
+    """
+    n = len(predictions)
+    per_ex = _per_example_rouge(predictions, references)
+
+    point = {k: sum(e[k] for e in per_ex) / max(n, 1)
+             for k in ("rouge1", "rouge2", "rougeL")}
+    point["bleu"] = sacrebleu.corpus_bleu(predictions, [references]).score
+
+    # --- Bootstrap ---
+    rng = random.Random(seed)
+    samples = {k: [] for k in ("rouge1", "rouge2", "rougeL", "bleu")}
+    for _ in range(n_bootstrap):
+        idx = [rng.randrange(n) for _ in range(n)]
+        for k in ("rouge1", "rouge2", "rougeL"):
+            samples[k].append(sum(per_ex[i][k] for i in idx) / n)
+        samples["bleu"].append(sacrebleu.corpus_bleu(
+            [predictions[i] for i in idx], [[references[i] for i in idx]]).score)
+
+    ci = {}
+    for k, vals in samples.items():
+        vals.sort()
+        lo = vals[int(0.025 * n_bootstrap)]
+        hi = vals[int(0.975 * n_bootstrap) - 1]
+        ci[k] = [lo, hi]
+
+    return {**point, "ci95": ci, "n_samples": n}
 
 
 def load_baseline(cfg: Config):
@@ -115,13 +140,13 @@ def main() -> None:
         test_data = test_data[:args.n]
     print(f"Jeu de test : {len(test_data)} exemples")
 
-    results = {}
+    results, dumps = {}, {}
 
     # Modele fine-tune
     adapter = args.adapter or cfg.train.output_dir
     ft_model, ft_tok = load_model(cfg, adapter, None)
     ft = evaluate_model(ft_model, ft_tok, test_data, "fine-tune (LoRA)")
-    results["finetuned"] = ft["metrics"]
+    results["finetuned"], dumps["finetuned"] = ft["metrics"], ft["predictions"]
 
     # Modele de base (optionnel)
     if args.baseline:
@@ -129,28 +154,45 @@ def main() -> None:
         torch.cuda.empty_cache()
         base_model, base_tok = load_baseline(cfg)
         base = evaluate_model(base_model, base_tok, test_data, "base (non fine-tune)")
-        results["baseline"] = base["metrics"]
+        results["baseline"], dumps["baseline"] = base["metrics"], base["predictions"]
 
     # Rapport
-    print("\n" + "=" * 60)
-    print("RESULTATS")
-    print("=" * 60)
+    print("\n" + "=" * 66)
+    print("RESULTATS  (IC 95 % par bootstrap, 1000 reechantillonnages)")
+    print("=" * 66)
     for name, m in results.items():
-        print(f"\n{name} :")
-        print(f"  ROUGE-1 : {m['rouge1']:.4f}")
-        print(f"  ROUGE-2 : {m['rouge2']:.4f}")
-        print(f"  ROUGE-L : {m['rougeL']:.4f}")
-        print(f"  BLEU    : {m['bleu']:.2f}")
+        print(f"\n{name} (n={m['n_samples']}) :")
+        for key, label, fmt in (("rouge1", "ROUGE-1", ".4f"),
+                                ("rouge2", "ROUGE-2", ".4f"),
+                                ("rougeL", "ROUGE-L", ".4f"),
+                                ("bleu", "BLEU   ", ".2f")):
+            lo, hi = m["ci95"][key]
+            print(f"  {label} : {m[key]:{fmt}}  [IC95 {lo:{fmt}} - {hi:{fmt}}]")
 
     if "baseline" in results:
-        d1 = results["finetuned"]["rouge1"] - results["baseline"]["rouge1"]
-        db = results["finetuned"]["bleu"] - results["baseline"]["bleu"]
-        print(f"\nGain du fine-tuning : ROUGE-1 {d1:+.4f} | BLEU {db:+.2f}")
+        print("\nGain du fine-tuning :")
+        for key, label in (("rouge1", "ROUGE-1"), ("rougeL", "ROUGE-L"),
+                           ("bleu", "BLEU")):
+            ft_v, base_v = results["finetuned"][key], results["baseline"][key]
+            ft_lo = results["finetuned"]["ci95"][key][0]
+            base_hi = results["baseline"]["ci95"][key][1]
+            # Heuristique lisible : les IC se recouvrent-ils ?
+            verdict = "IC disjoints" if ft_lo > base_hi else "IC qui se recouvrent"
+            print(f"  {label:8s} {base_v:.4f} -> {ft_v:.4f} "
+                  f"({(ft_v-base_v)/base_v*100:+.0f} %)  [{verdict}]")
 
-    out = Path(cfg.train.output_dir) / "eval_metrics.json"
-    with open(out, "w", encoding="utf-8") as f:
+    out_dir = Path(cfg.train.output_dir)
+    with open(out_dir / "eval_metrics.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"\nMetriques ecrites dans : {out}")
+    # Predictions brutes : indispensables pour l'analyse qualitative des echecs
+    with open(out_dir / "eval_predictions.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "questions": [d["instruction"] for d in test_data],
+            "references": [d["output"] for d in test_data],
+            **dumps,
+        }, f, indent=2, ensure_ascii=False)
+    print(f"\nMetriques ecrites dans   : {out_dir / 'eval_metrics.json'}")
+    print(f"Predictions ecrites dans : {out_dir / 'eval_predictions.json'}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,82 @@
+[
+  {
+    "instruction": "Qu'est-ce que le compromis biais-variance (bias-variance tradeoff) ?",
+    "output": "C'est la decomposition de l'erreur de generalisation d'un modele en trois termes : biais, variance et bruit irreductible. Le biais mesure l'erreur due a des hypotheses trop simplificatrices : un modele trop simple sous-apprend. La variance mesure la sensibilite du modele aux fluctuations des donnees d'entrainement : un modele trop complexe sur-apprend. Reduire l'un augmente souvent l'autre, d'ou le compromis. L'objectif est de minimiser l'erreur totale, pas un seul terme. En pratique, on ajuste la complexite (profondeur d'arbre, regularisation, nombre de parametres) et on surveille l'ecart entre erreur d'entrainement et de validation pour se situer sur cette courbe."
+  },
+  {
+    "instruction": "Comment detecter et prevenir l'overfitting ?",
+    "output": "Detection : un ecart important entre une bonne performance sur le train et une mauvaise sur la validation signale le sur-apprentissage. On le visualise avec des courbes d'apprentissage (train et validation au fil des epochs). Prevention : (1) plus de donnees ou de l'augmentation ; (2) regularisation L1/L2, dropout, weight decay ; (3) reduire la complexite du modele ; (4) early stopping sur la loss de validation ; (5) validation croisee pour une estimation robuste ; (6) pour les LLM en LoRA, limiter le nombre d'epochs et le rang. L'idee generale est de contraindre le modele a apprendre le signal generalisable plutot que le bruit specifique au jeu d'entrainement."
+  },
+  {
+    "instruction": "Pourquoi faut-il separer les donnees en train/validation/test ?",
+    "output": "Pour estimer honnetement la capacite de generalisation. Le TRAIN sert a ajuster les parametres. La VALIDATION sert a choisir les hyperparametres et a decider de l'arret : le modele la voit indirectement, elle est donc optimiste. Le TEST reste intact jusqu'a la toute fin et donne l'estimation non biaisee de la performance reelle. Melanger ces roles cause une fuite de donnees et une surestimation des performances. Regles clefs : faire le split AVANT tout pretraitement appris (normalisation, encodage), et pour des donnees temporelles, splitter chronologiquement et jamais aleatoirement, sous peine de predire le passe a partir du futur."
+  },
+  {
+    "instruction": "Qu'est-ce que la validation croisee (cross-validation) ?",
+    "output": "La validation croisee estime la performance d'un modele en reutilisant efficacement les donnees. En k-fold, on decoupe le jeu en k parts : on entraine sur k-1 parts et on evalue sur la part restante, en repetant k fois de sorte que chaque part serve une fois de test. On moyenne ensuite les k scores, ce qui donne une estimation plus stable et une idee de la variance. C'est precieux sur de petits jeux ou un seul split serait peu fiable. Variantes : StratifiedKFold preserve les proportions de classes, essentiel si desequilibre, et TimeSeriesSplit respecte l'ordre temporel. Cout : k entrainements, donc plus lourd qu'un simple holdout."
+  },
+  {
+    "instruction": "Comment gerer un jeu de donnees desequilibre en classification ?",
+    "output": "D'abord, changer de metrique : l'accuracy est trompeuse, car predire toujours la classe majoritaire donne 99 % si elle represente 99 % des cas. Utiliser precision, rappel, F1 et AUC-PR. Ensuite plusieurs leviers : (1) reechantillonnage, en sur-echantillonnant la minorite avec SMOTE ou en sous-echantillonnant la majorite ; (2) ponderation des classes (`class_weight='balanced'`) pour penaliser davantage les erreurs sur la minorite ; (3) ajuster le seuil de decision plutot que garder 0,5 ; (4) methodes d'ensemble. Important : appliquer le reechantillonnage UNIQUEMENT sur le train, dans chaque pli de validation croisee, jamais sur la validation ou le test."
+  },
+  {
+    "instruction": "Qu'est-ce que la regularisation L1 et L2, et quand utiliser chacune ?",
+    "output": "Les deux ajoutent une penalite sur la taille des poids a la fonction de cout pour limiter le sur-apprentissage. La L2 (Ridge) penalise la somme des carres des poids : elle les reduit de facon lisse vers zero sans les annuler, et gere bien les variables correlees. La L1 (Lasso) penalise la somme des valeurs absolues : elle pousse certains poids exactement a zero, produisant un modele parcimonieux qui fait de la selection de variables. On choisit L1 pour la sparsite et l'interpretabilite, L2 pour la stabilite. L'Elastic Net combine les deux. L'intensite est reglee par un hyperparametre, souvent nomme alpha ou lambda, a determiner par validation."
+  },
+  {
+    "instruction": "Quelle est la difference entre apprentissage supervise, non supervise et par renforcement ?",
+    "output": "Supervise : on apprend une correspondance entree vers sortie a partir d'exemples etiquetes (classification, regression). Non supervise : pas d'etiquettes, on cherche une structure cachee (clustering, reduction de dimension, detection d'anomalies). Renforcement : un agent apprend par essais-erreurs en interagissant avec un environnement, guide par un signal de recompense qu'il cherche a maximiser sur le long terme (jeux, robotique, RLHF des LLM). La difference clef est la nature du signal d'apprentissage : etiquettes explicites, aucune etiquette, ou recompenses differees. Beaucoup de systemes modernes sont hybrides : un LLM est pre-entraine en auto-supervise puis aligne par renforcement."
+  },
+  {
+    "instruction": "Quelle est la difference entre parametres et hyperparametres ?",
+    "output": "Les parametres sont appris par le modele pendant l'entrainement a partir des donnees : les poids d'un reseau de neurones, les coefficients d'une regression, les seuils d'un arbre. Les hyperparametres sont fixes AVANT l'entrainement et gouvernent le processus d'apprentissage lui-meme : learning rate, nombre d'epochs, profondeur d'arbre, force de regularisation, rang LoRA. On ne peut pas les apprendre par descente de gradient sur la loss d'entrainement, car cela conduirait a des valeurs degenerees ; on les selectionne donc sur un jeu de VALIDATION, par recherche en grille, recherche aleatoire ou optimisation bayesienne. C'est pour cela qu'un troisieme jeu, le test, reste necessaire pour une estimation non biaisee."
+  },
+  {
+    "instruction": "Qu'est-ce que la descente de gradient ?",
+    "output": "C'est l'algorithme d'optimisation qui ajuste les parametres d'un modele pour minimiser une fonction de cout. On calcule le gradient de la loss par rapport aux parametres, c'est-a-dire la direction de plus forte augmentation, puis on se deplace dans la direction opposee d'un pas proportionnel au learning rate. Trois variantes : le batch gradient descent utilise tout le jeu a chaque pas (stable mais lent), le stochastique un seul exemple (rapide mais bruite), et le mini-batch un petit lot, ce qui est le compromis standard. Les optimiseurs modernes comme Adam ajoutent un momentum et un pas adaptatif par parametre, ce qui accelere nettement la convergence."
+  },
+  {
+    "instruction": "A quoi sert le learning rate et que se passe-t-il s'il est mal regle ?",
+    "output": "Le learning rate controle la taille du pas effectue a chaque mise a jour des parametres. C'est generalement l'hyperparametre le plus important. S'il est trop grand, la loss oscille ou diverge, car on saute par-dessus le minimum ; s'il est trop petit, l'entrainement est extremement lent et peut se bloquer dans une region plate. En pratique, on utilise un ordonnanceur : un warmup progressif au debut evite les mises a jour brutales quand les gradients sont instables, puis une decroissance (cosine ou lineaire) affine la convergence en fin d'entrainement. Un bon diagnostic consiste a tracer la loss : une courbe en dents de scie signale un pas trop grand, une courbe quasi plate un pas trop petit."
+  },
+  {
+    "instruction": "Qu'est-ce qu'une matrice de confusion et que lit-on dedans ?",
+    "output": "C'est un tableau croisant les classes reelles et les classes predites. En binaire, elle contient les vrais positifs, vrais negatifs, faux positifs (fausses alertes) et faux negatifs (cas manques). Toutes les metriques classiques en derivent : la precision est la part de vrais positifs parmi les predictions positives, le rappel la part de vrais positifs parmi les cas reellement positifs, et le F1 leur moyenne harmonique. Son interet est de montrer la STRUCTURE des erreurs, ce qu'un score unique masque : on voit immediatement si le modele confond deux classes particulieres ou s'il ignore une classe minoritaire. En multiclasse, la lecture des cases hors diagonale oriente directement le travail d'amelioration."
+  },
+  {
+    "instruction": "Quelle est la difference entre precision et rappel, et comment choisir ?",
+    "output": "La precision repond a la question : parmi les cas que j'ai predits positifs, combien le sont vraiment ? Le rappel repond a : parmi les cas reellement positifs, combien en ai-je trouve ? Il y a un arbitrage, regle par le seuil de decision : abaisser le seuil augmente le rappel et degrade la precision, et inversement. Le choix depend du cout des erreurs. On privilegie le rappel quand manquer un cas est grave : depistage medical, detection de fraude, alertes de securite. On privilegie la precision quand une fausse alerte est couteuse ou nuit a l'experience : filtrage de spam, recommandation. Le F1 les combine, et la courbe precision-rappel resume le comportement sur tous les seuils."
+  },
+  {
+    "instruction": "Qu'est-ce que l'AUC-ROC et comment l'interpreter ?",
+    "output": "La courbe ROC trace le taux de vrais positifs contre le taux de faux positifs pour tous les seuils de decision possibles. L'AUC est l'aire sous cette courbe : elle vaut 0,5 pour un classifieur aleatoire et 1,0 pour un classifieur parfait. Son interpretation probabiliste est elegante : l'AUC est la probabilite qu'un exemple positif tire au hasard recoive un score superieur a celui d'un exemple negatif tire au hasard. Avantage : elle evalue la qualite du CLASSEMENT independamment du seuil choisi. Limite importante : sur des donnees tres desequilibrees, l'AUC-ROC reste optimiste car le taux de faux positifs est dilue par la masse de negatifs ; on lui prefere alors l'aire sous la courbe precision-rappel."
+  },
+  {
+    "instruction": "Qu'est-ce que le feature engineering et pourquoi est-ce important ?",
+    "output": "Le feature engineering consiste a construire, transformer et selectionner les variables fournies au modele afin d'exposer explicitement l'information utile. Exemples : extraire le jour de la semaine d'une date, calculer un ratio entre deux colonnes, agreger l'historique d'un client, encoder une categorie, appliquer un logarithme a une variable tres asymetrique. Son importance vient de ce que la plupart des modeles classiques ne peuvent pas decouvrir seuls des relations que l'on peut leur donner directement : de bonnes variables battent souvent un modele plus sophistique. Les reseaux profonds reduisent ce besoin sur les donnees non structurees comme le texte ou l'image, mais sur des donnees tabulaires, il reste le levier le plus rentable."
+  },
+  {
+    "instruction": "Comment encoder des variables categorielles ?",
+    "output": "Le one-hot encoding cree une colonne binaire par modalite : c'est le choix par defaut, sur pour les modeles lineaires, mais il explose en dimension si la cardinalite est elevee. L'ordinal encoding attribue un entier par modalite : il n'a de sens que si un ordre existe reellement, sinon il introduit une fausse relation de grandeur, meme si les modeles a base d'arbres le tolerent bien. Pour une cardinalite tres elevee, le target encoding remplace la modalite par une statistique de la cible, mais il exige une validation croisee interne pour eviter la fuite. Pour du texte libre, on passe a des embeddings. Regle constante : ajuster l'encodeur sur le train uniquement et prevoir le traitement des modalites inconnues au moment de l'inference."
+  },
+  {
+    "instruction": "Qu'est-ce qu'un modele d'ensemble et pourquoi est-ce efficace ?",
+    "output": "Un modele d'ensemble combine plusieurs modeles pour obtenir une prediction meilleure que chacun pris isolement. Le bagging entraine des modeles en parallele sur des echantillons bootstrap et moyenne leurs sorties : c'est le principe de la Random Forest, qui reduit surtout la VARIANCE. Le boosting entraine des modeles sequentiellement, chacun corrigeant les erreurs du precedent : c'est XGBoost ou LightGBM, qui reduisent surtout le BIAIS. Le stacking apprend un meta-modele qui pondere les predictions de modeles heterogenes. L'efficacite repose sur la decorrelation des erreurs : si les modeles se trompent sur des cas differents, la combinaison compense. Sur donnees tabulaires, le boosting sur arbres reste l'etat de l'art."
+  },
+  {
+    "instruction": "Qu'est-ce que l'ACP (analyse en composantes principales) ?",
+    "output": "L'ACP est une methode de reduction de dimension non supervisee. Elle cherche de nouveaux axes, les composantes principales, qui sont des combinaisons lineaires des variables d'origine, orthogonales entre elles et ordonnees par variance expliquee decroissante. En conservant les premieres composantes, on comprime les donnees en perdant le minimum d'information. Usages : visualiser en deux dimensions, accelerer un entrainement, decorreler des variables, reduire le bruit. Prerequis indispensable : standardiser les variables au prealable, sinon celles de grande amplitude dominent artificiellement. Limite : les composantes sont des melanges de variables, donc peu interpretables, et l'ACP ne capture que des structures lineaires ; pour la visualisation de structures non lineaires, on utilise t-SNE ou UMAP."
+  },
+  {
+    "instruction": "Qu'est-ce que le clustering k-means et quelles sont ses limites ?",
+    "output": "K-means partitionne les donnees en k groupes en alternant deux etapes : affecter chaque point au centroide le plus proche, puis recalculer chaque centroide comme la moyenne de ses points, jusqu'a stabilisation. Il est simple, rapide et passe bien a l'echelle. Ses limites sont importantes : il faut choisir k a l'avance, souvent via la methode du coude ou le score de silhouette ; il suppose des groupes spheriques de taille comparable et echoue sur des formes allongees ou imbriquees ; il est sensible a l'initialisation, d'ou l'usage de k-means++ ; il exige des variables standardisees car il repose sur la distance euclidienne ; et il est sensible aux valeurs extremes. Pour des formes arbitraires, DBSCAN ou un modele de melange gaussien sont plus adaptes."
+  },
+  {
+    "instruction": "Quelle est la difference entre classification et regression ?",
+    "output": "La difference tient a la nature de la variable cible. En classification, la cible est categorielle : on predit une classe parmi un ensemble fini, comme spam ou non-spam. En regression, la cible est continue : on predit une valeur numerique, comme un prix ou une temperature. Cela change tout le reste du pipeline. Les fonctions de cout different : entropie croisee en classification, erreur quadratique ou absolue en regression. Les metriques aussi : accuracy, F1 et AUC d'un cote, RMSE, MAE et R2 de l'autre. La frontiere n'est pas toujours nette : un classifieur produit generalement une probabilite continue, et une cible ordinale peut se traiter des deux facons selon l'usage vise."
+  },
+  {
+    "instruction": "Que signifie l'expression 'no free lunch' en machine learning ?",
+    "output": "Le theoreme du no free lunch enonce qu'aucun algorithme d'apprentissage n'est superieur a tous les autres sur l'ensemble de tous les problemes possibles : moyennee sur toutes les distributions concevables, la performance de tous les algorithmes est identique. La consequence pratique est qu'il n'existe pas de meilleur modele dans l'absolu, seulement un modele adapte a la structure d'un probleme donne. Toute performance repose sur un biais inductif, c'est-a-dire des hypotheses implicites : linearite, continuite, invariance par translation pour les convolutions. D'ou la demarche empirique du metier : etablir une baseline simple, comparer plusieurs familles de modeles sur des donnees representatives, et se mefier des affirmations universelles sur la superiorite d'une methode."
+  }
+]

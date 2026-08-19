@@ -1,17 +1,15 @@
 """
-Generateur du dataset brut Q&A (domaine : Python / Data Science / ML).
+Assemble le corpus brut Q&A a partir de data/corpus/*.json.
 
-Produit `data/raw/raw_qa_data.json` a partir d'un corpus cure a la main
-(reponses expertes, concises et correctes), puis applique une augmentation
-LEGERE et transparente : chaque question recoit quelques reformulations
-(paraphrases) partageant la meme reponse de reference. Cela multiplie le
-volume tout en preservant la qualite des reponses.
+Chaque fichier de `data/corpus/` contient les paires question/reponse CUREES
+d'une categorie (le nom du fichier donne la categorie). Ce script les fusionne,
+attribue a chaque concept un `group_id` STABLE, et ecrit data/raw/raw_qa_data.json.
 
-Format de sortie (compatible prepare_dataset.py) :
-    [
-      {"instruction": "...", "output": "...", "input": "", "category": "..."},
-      ...
-    ]
+IMPORTANT — aucune augmentation n'est faite ici.
+Les reformulations de questions sont generees dans `prepare_dataset.py`, APRES
+le decoupage train/val/test et UNIQUEMENT sur le jeu d'entrainement. Augmenter
+avant le split ferait fuiter la meme reponse de reference des deux cotes
+(voir README, section "Correction methodologique").
 
 Usage :
     python scripts/generate_dataset.py
@@ -19,599 +17,76 @@ Usage :
 from __future__ import annotations
 
 import json
-import random
+import unicodedata
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CORPUS_DIR = PROJECT_ROOT / "data" / "corpus"
 OUT_FILE = PROJECT_ROOT / "data" / "raw" / "raw_qa_data.json"
 
-SEED = 42
+
+def normalize_text(text: str) -> str:
+    """Uniformise le corpus : pas d'accents (coherence + robustesse console).
+
+    Le corpus a ete redige sans accents ; cette normalisation garantit qu'un
+    ajout ulterieur reste homogene avec l'existant.
+    """
+    decomposed = unicodedata.normalize("NFD", text)
+    stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    return unicodedata.normalize("NFC", stripped)
 
 
-# ============================================================================
-#  CORPUS CURE
-#  Chaque entree : (categorie, question, reponse experte)
-#  Reponses volontairement concises (80-180 mots) mais correctes et utiles.
-# ============================================================================
+def load_category(path: Path) -> list[dict]:
+    """Charge un fichier de categorie et attribue les group_id."""
+    category = path.stem.replace("_", "-")
+    with open(path, "r", encoding="utf-8") as f:
+        entries = json.load(f)
 
-CORPUS: list[tuple[str, str, str]] = [
-
-    # ----------------------- Python : coeur & idiomes -----------------------
-    ("python-core",
-     "Qu'est-ce que la vectorisation en Python et pourquoi est-elle plus rapide que les boucles ?",
-     "La vectorisation consiste a remplacer des boucles Python explicites par des operations "
-     "sur des tableaux entiers, deleguees a du code compile (C/Fortran) via NumPy ou Pandas. "
-     "Elle est plus rapide pour deux raisons : (1) la boucle s'execute en code natif, sans "
-     "l'overhead de l'interpreteur CPython a chaque iteration ; (2) les donnees sont contigues "
-     "en memoire, ce qui exploite le cache CPU et les instructions SIMD. "
-     "Exemple : `arr * 2` traite tout le tableau d'un coup, la ou `[x*2 for x in arr]` "
-     "repasse par l'interpreteur a chaque element. Sur de gros volumes, le gain est "
-     "typiquement de 10x a 100x. La contrepartie est une consommation memoire plus elevee "
-     "(les tableaux intermediaires sont materialises)."),
-
-    ("python-core",
-     "Explique la difference entre `is` et `==` en Python.",
-     "`==` compare les valeurs (egalite logique, via la methode `__eq__`), tandis que `is` "
-     "compare les identites (est-ce le meme objet en memoire, meme `id()`). "
-     "Exemple : `[1,2] == [1,2]` vaut True (memes valeurs) mais `[1,2] is [1,2]` vaut False "
-     "(deux objets distincts). On utilise `is` uniquement pour comparer a des singletons "
-     "comme `None`, `True`, `False` : ecrire `if x is None:` et jamais `if x == None:`. "
-     "Attention au piege du caching des petits entiers : `256 is 256` peut valoir True car "
-     "CPython met en cache les entiers de -5 a 256, mais ce comportement est un detail "
-     "d'implementation sur lequel il ne faut jamais s'appuyer."),
-
-    ("python-core",
-     "A quoi servent les generateurs et le mot-cle `yield` ?",
-     "Un generateur est une fonction qui produit ses valeurs paresseusement (lazy), une a la "
-     "fois, au lieu de tout construire en memoire. `yield` suspend l'execution en renvoyant "
-     "une valeur, puis reprend au meme point a l'appel suivant. Avantage principal : "
-     "l'empreinte memoire reste constante meme sur des flux enormes ou infinis. "
-     "Exemple : `def lignes(f):\\n    for l in f:\\n        yield l.strip()` traite un "
-     "fichier de plusieurs Go sans le charger entierement. Les generateurs sont a la base "
-     "des pipelines de donnees efficaces et se composent bien avec `itertools`. "
-     "On les consomme une seule fois : une fois epuises, il faut les recreer."),
-
-    ("python-core",
-     "Qu'est-ce qu'un decorateur en Python ?",
-     "Un decorateur est une fonction qui prend une fonction (ou classe) et en retourne une "
-     "version modifiee, sans changer son code source. La syntaxe `@deco` au-dessus d'une "
-     "fonction equivaut a `f = deco(f)`. On les utilise pour ajouter un comportement "
-     "transversal : logging, mesure de temps, cache (`functools.lru_cache`), controle "
-     "d'acces, retry. Exemple minimal :\\n"
-     "```python\\n"
-     "import functools\\n"
-     "def timer(fn):\\n"
-     "    @functools.wraps(fn)\\n"
-     "    def wrapper(*args, **kwargs):\\n"
-     "        import time; t = time.perf_counter()\\n"
-     "        r = fn(*args, **kwargs)\\n"
-     "        print(f'{fn.__name__}: {time.perf_counter()-t:.3f}s')\\n"
-     "        return r\\n"
-     "    return wrapper\\n"
-     "```\\n"
-     "`functools.wraps` preserve le nom et la docstring de la fonction originale."),
-
-    ("python-core",
-     "Explique le fonctionnement de `async`/`await` en Python.",
-     "`async`/`await` permet la programmation asynchrone cooperative : une coroutine peut se "
-     "mettre en pause a un point `await` pour laisser d'autres taches s'executer, le tout sur "
-     "un seul thread via une boucle d'evenements (`asyncio`). C'est ideal pour les taches "
-     "I/O-bound (requetes reseau, acces disque, appels API) ou l'on passe l'essentiel du temps "
-     "a attendre. Exemple : lancer 100 requetes HTTP concurrentes avec `asyncio.gather` est "
-     "bien plus rapide qu'en sequentiel, sans le cout des threads. Attention : cela n'accelere "
-     "PAS le code CPU-bound (calcul pur), car tout tourne sur un seul coeur — pour ca il faut "
-     "du multiprocessing. Regle d'or : ne jamais bloquer la boucle avec du code synchrone lourd."),
-
-    ("python-core",
-     "Quelle est la difference entre une liste et un tuple ?",
-     "Une liste (`[]`) est mutable : on peut ajouter, supprimer, modifier ses elements. Un "
-     "tuple (`()`) est immuable : une fois cree, il ne change plus. Consequences pratiques : "
-     "(1) un tuple peut servir de cle de dictionnaire ou d'element de set (il est hashable), "
-     "pas une liste ; (2) le tuple est legerement plus leger et rapide ; (3) l'immuabilite "
-     "documente une intention (donnees fixes, comme des coordonnees). On choisit la liste pour "
-     "une collection homogene amenee a evoluer, et le tuple pour un enregistrement heterogene "
-     "et fixe. Note : un tuple contenant une liste reste globalement 'immuable' au niveau de "
-     "sa structure, mais la liste interne, elle, peut muter."),
-
-    ("python-core",
-     "Qu'est-ce que le GIL (Global Interpreter Lock) et quel impact a-t-il ?",
-     "Le GIL est un verrou global de CPython qui garantit qu'un seul thread execute du bytecode "
-     "Python a la fois. Consequence : le multithreading n'accelere pas le code CPU-bound "
-     "(calcul pur), car les threads ne s'executent pas vraiment en parallele. En revanche, il "
-     "aide pour l'I/O-bound : le GIL est relache pendant les attentes reseau/disque, donc les "
-     "threads progressent en concurrence. Pour paralleliser du calcul, on utilise "
-     "`multiprocessing` (plusieurs processus, chacun son interpreteur) ou des bibliotheques qui "
-     "liberent le GIL (NumPy). Note : Python 3.13 introduit un mode experimental 'free-threaded' "
-     "(sans GIL), mais il n'est pas encore le defaut."),
-
-    ("python-core",
-     "Comment gerer proprement les exceptions en Python ?",
-     "Principes : (1) attraper des exceptions specifiques, jamais un `except:` nu qui masque "
-     "meme `KeyboardInterrupt` ; (2) garder le bloc `try` le plus petit possible ; (3) utiliser "
-     "`finally` ou un context manager (`with`) pour liberer les ressources ; (4) preferer "
-     "`raise ... from e` pour conserver la cause originale. Exemple :\\n"
-     "```python\\n"
-     "try:\\n"
-     "    data = json.loads(text)\\n"
-     "except json.JSONDecodeError as e:\\n"
-     "    raise ValueError('JSON invalide') from e\\n"
-     "```\\n"
-     "Evite la logique de controle par exceptions quand un simple `if` suffit, mais suis le "
-     "principe EAFP ('demander pardon plutot que permission') quand c'est plus lisible."),
-
-    # ----------------------- NumPy / Pandas -----------------------
-    ("numpy-pandas",
-     "Quelle est la difference entre `.loc` et `.iloc` dans Pandas ?",
-     "`.loc` selectionne par etiquette (label) : noms de colonnes et valeurs d'index. `.iloc` "
-     "selectionne par position entiere (0-based), comme les listes Python. Exemple : sur un "
-     "DataFrame indexe par des dates, `df.loc['2024-01-01']` cible la ligne portant cette "
-     "etiquette, alors que `df.iloc[0]` cible la premiere ligne quelle que soit son etiquette. "
-     "Piege classique : avec `.loc`, les slices sont INCLUSIFS des deux bornes "
-     "(`df.loc['a':'c']` inclut 'c'), alors qu'avec `.iloc` la borne de fin est exclue comme en "
-     "Python standard (`df.iloc[0:3]` donne 3 lignes). Utilise `.loc` par defaut pour un code "
-     "robuste au reordonnancement, et `.iloc` quand la position compte vraiment."),
-
-    ("numpy-pandas",
-     "Comment eviter le warning `SettingWithCopyWarning` dans Pandas ?",
-     "Ce warning signale une modification ambigue : Pandas ne sait pas si tu modifies une copie "
-     "ou la vue originale (chained indexing). La cause typique est `df[df.a > 0]['b'] = 1`, qui "
-     "peut ne rien modifier du tout. La solution est d'utiliser une indexation unique avec "
-     "`.loc` : `df.loc[df.a > 0, 'b'] = 1`. Si tu veux volontairement travailler sur une copie "
-     "independante, sois explicite avec `.copy()` : `sous = df[df.a > 0].copy()`. Regle "
-     "generale : evite le double crochet successif (`df[...][...]`) en assignation. A partir de "
-     "Pandas 3.0, le mode Copy-on-Write devient le defaut et rend ce comportement previsible."),
-
-    ("numpy-pandas",
-     "Qu'est-ce que le broadcasting en NumPy ?",
-     "Le broadcasting est le mecanisme qui permet a NumPy d'appliquer des operations entre "
-     "tableaux de formes differentes sans copier explicitement les donnees. NumPy 'etire' "
-     "virtuellement les dimensions de taille 1 pour les faire correspondre. Exemple : ajouter "
-     "un vecteur de forme (3,) a une matrice (4,3) ajoute le vecteur a chaque ligne. Regles : "
-     "on aligne les formes par la droite ; deux dimensions sont compatibles si elles sont "
-     "egales ou si l'une vaut 1. Interet : un code concis et rapide, sans boucle ni "
-     "materialisation d'un gros tableau intermediaire. Cas d'usage frequent : centrer/normaliser "
-     "des donnees en soustrayant `X.mean(axis=0)` a une matrice `X`."),
-
-    ("numpy-pandas",
-     "Comment optimiser la memoire d'un gros DataFrame Pandas ?",
-     "Leviers principaux : (1) sous-typer les colonnes numeriques (`int64`->`int32/int16`, "
-     "`float64`->`float32`) avec `pd.to_numeric(..., downcast=...)` ; (2) convertir les colonnes "
-     "de chaines a faible cardinalite en `category`, ce qui remplace les chaines repetees par "
-     "des codes entiers ; (3) charger seulement les colonnes utiles (`usecols`) et par morceaux "
-     "(`chunksize`) ; (4) preferer des formats colonnaires comme Parquet a CSV. Mesure l'impact "
-     "avec `df.info(memory_usage='deep')`. Sur des jeux vraiment volumineux, envisage Polars ou "
-     "Dask qui gerent le out-of-core et le multithreading nativement."),
-
-    ("numpy-pandas",
-     "Quelle est la difference entre `apply`, `map` et les operations vectorisees dans Pandas ?",
-     "Les operations vectorisees (ex. `df['a'] + df['b']`, methodes `.str`, `.dt`) sont les plus "
-     "rapides : elles s'executent en code compile. `map` s'applique element par element sur une "
-     "Series, utile pour un mapping via dict ou une petite fonction. `apply` est le plus "
-     "flexible (fonction arbitraire, sur lignes ou colonnes) mais aussi le plus lent car il "
-     "boucle en Python. Hierarchie de choix : cherche d'abord une operation vectorisee native, "
-     "sinon `map`/`replace` pour un remplacement, et `apply` seulement en dernier recours. "
-     "Eviter `apply(axis=1)` sur de gros DataFrames : c'est souvent 10 a 100x plus lent qu'une "
-     "reecriture vectorisee."),
-
-    ("numpy-pandas",
-     "Comment fusionner deux DataFrames et quels types de jointures existent ?",
-     "On utilise `pd.merge(gauche, droite, on='cle', how=...)`. Les types de `how` : 'inner' "
-     "(seulement les cles presentes des deux cotes, defaut), 'left' (toutes les lignes de "
-     "gauche), 'right' (toutes celles de droite), 'outer' (union des cles). Bonnes pratiques : "
-     "verifier la cardinalite avec `validate='one_to_many'` pour attraper les doublons "
-     "inattendus qui font exploser le nombre de lignes ; controler les valeurs manquantes "
-     "generees par une jointure externe ; utiliser `indicator=True` pour savoir d'ou vient "
-     "chaque ligne. Pour joindre sur l'index, `df.join()` est plus concis que `merge`."),
-
-    # ----------------------- ML fundamentals -----------------------
-    ("ml-fundamentals",
-     "Qu'est-ce que le compromis biais-variance (bias-variance tradeoff) ?",
-     "C'est la decomposition de l'erreur de generalisation d'un modele en trois termes : biais, "
-     "variance et bruit irreductible. Le biais mesure l'erreur due a des hypotheses trop "
-     "simplificatrices (un modele trop simple sous-apprend, underfitting). La variance mesure la "
-     "sensibilite du modele aux fluctuations des donnees d'entrainement (un modele trop complexe "
-     "sur-apprend, overfitting). Reduire l'un augmente souvent l'autre : c'est le compromis. "
-     "L'objectif est de minimiser l'erreur totale, pas un seul terme. En pratique, on ajuste la "
-     "complexite (profondeur d'arbre, regularisation, nombre de parametres) et on surveille "
-     "l'ecart entre erreur d'entrainement et de validation pour se situer sur cette courbe."),
-
-    ("ml-fundamentals",
-     "Comment detecter et prevenir l'overfitting ?",
-     "Detection : un ecart important entre une bonne performance sur le train et une mauvaise "
-     "sur la validation/test signale le sur-apprentissage. On le visualise avec des courbes "
-     "d'apprentissage (train vs val au fil des epochs). Prevention : (1) plus de donnees ou de "
-     "l'augmentation ; (2) regularisation (L1/L2, dropout, weight decay) ; (3) reduire la "
-     "complexite du modele ; (4) early stopping sur la loss de validation ; (5) validation "
-     "croisee pour une estimation robuste ; (6) pour les LLM/LoRA, limiter le nombre d'epochs "
-     "(2-3) et le rang. L'idee generale est de contraindre le modele a apprendre le signal "
-     "generalisable plutot que le bruit specifique au jeu d'entrainement."),
-
-    ("ml-fundamentals",
-     "Pourquoi faut-il separer les donnees en train/validation/test ?",
-     "Pour estimer honnetement la capacite de generalisation. Le TRAIN sert a ajuster les "
-     "parametres. La VALIDATION sert a choisir les hyperparametres et a decider de l'arret "
-     "(early stopping) : le modele la 'voit' indirectement, elle est donc optimiste. Le TEST "
-     "reste intact jusqu'a la toute fin et donne l'estimation non biaisee de la performance "
-     "reelle. Melanger ces roles cause une fuite de donnees (data leakage) et une surestimation "
-     "des performances. Regles clefs : faire le split AVANT tout pretraitement appris "
-     "(normalisation, encodage), et pour des donnees temporelles, splitter chronologiquement et "
-     "jamais aleatoirement, sous peine de predire le passe a partir du futur."),
-
-    ("ml-fundamentals",
-     "Qu'est-ce que la validation croisee (cross-validation) ?",
-     "La validation croisee estime la performance d'un modele en reutilisant les donnees de "
-     "maniere efficace. En k-fold, on decoupe le jeu en k parts : on entraine sur k-1 parts et "
-     "on evalue sur la part restante, en repetant k fois de sorte que chaque part serve une fois "
-     "de test. On moyenne ensuite les k scores, ce qui donne une estimation plus stable et une "
-     "idee de la variance. C'est precieux sur de petits jeux ou un seul split serait peu fiable. "
-     "Variantes : StratifiedKFold (preserve les proportions de classes, essentiel si "
-     "desequilibre) et TimeSeriesSplit (respecte l'ordre temporel). Cout : k entrainements, donc "
-     "plus lourd qu'un simple holdout."),
-
-    ("ml-fundamentals",
-     "Comment gerer un jeu de donnees desequilibre en classification ?",
-     "D'abord, changer de metrique : l'accuracy est trompeuse (predire toujours la classe "
-     "majoritaire donne 99% si elle represente 99%). Utiliser precision/rappel, F1, AUC-PR. "
-     "Ensuite, plusieurs leviers : (1) reechantillonnage — sur-echantillonner la minorite "
-     "(SMOTE) ou sous-echantillonner la majorite ; (2) ponderation des classes "
-     "(`class_weight='balanced'`) pour penaliser davantage les erreurs sur la minorite ; "
-     "(3) ajuster le seuil de decision plutot que garder 0,5 ; (4) methodes d'ensemble. "
-     "Important : appliquer le reechantillonnage UNIQUEMENT sur le train (dans le pli de CV), "
-     "jamais sur la validation/test, pour ne pas fausser l'evaluation."),
-
-    ("ml-fundamentals",
-     "Qu'est-ce que la regularisation L1 et L2, et quand utiliser chacune ?",
-     "Les deux ajoutent une penalite sur la taille des poids a la fonction de cout pour limiter "
-     "le sur-apprentissage. La L2 (Ridge) penalise la somme des carres des poids : elle les "
-     "reduit de facon lisse vers zero sans les annuler, et gere bien les features correlees. La "
-     "L1 (Lasso) penalise la somme des valeurs absolues : elle pousse certains poids exactement "
-     "a zero, produisant un modele parcimonieux qui fait de la selection de variables. On choisit "
-     "L1 quand on veut de la sparsite/interpretabilite ou eliminer des features inutiles, et L2 "
-     "quand on veut simplement de la stabilite. L'Elastic Net combine les deux. L'intensite est "
-     "reglee par un hyperparametre (souvent nomme alpha ou lambda), a valider."),
-
-    ("ml-fundamentals",
-     "Quelle est la difference entre apprentissage supervise, non supervise et par renforcement ?",
-     "Supervise : on apprend une correspondance entree->sortie a partir d'exemples etiquetes "
-     "(classification, regression). Non supervise : pas d'etiquettes, on cherche une structure "
-     "cachee (clustering, reduction de dimension, detection d'anomalies). Renforcement : un agent "
-     "apprend par essais-erreurs en interagissant avec un environnement, guide par un signal de "
-     "recompense, afin de maximiser la recompense cumulee (jeux, robotique, RLHF des LLM). "
-     "Difference clef : la nature du signal d'apprentissage — etiquettes explicites, aucune "
-     "etiquette, ou recompenses differees. Beaucoup de systemes modernes sont hybrides : par "
-     "exemple, un LLM est pre-entraine en auto-supervise puis aligne par renforcement (RLHF)."),
-
-    # ----------------------- Deep learning / LLM -----------------------
-    ("deep-learning-llm",
-     "Qu'est-ce que le fine-tuning et en quoi differe-t-il du RAG ?",
-     "Le fine-tuning ajuste les poids d'un modele pre-entraine sur un jeu de donnees specifique "
-     "pour lui inculquer un style, un format ou un savoir-faire. Le RAG (Retrieval-Augmented "
-     "Generation) laisse le modele intact mais lui fournit, au moment de l'inference, des "
-     "documents pertinents recuperes dans une base externe. Difference : le fine-tuning modifie "
-     "le comportement/le 'comment', le RAG apporte des connaissances factuelles a jour, le "
-     "'quoi'. On fine-tune pour un ton, un format de sortie, une tache recurrente ; on utilise le "
-     "RAG pour des faits qui changent souvent ou une base documentaire volumineuse. Les deux sont "
-     "complementaires : on peut fine-tuner un modele puis l'augmenter avec du RAG."),
-
-    ("deep-learning-llm",
-     "Explique ce qu'est LoRA et pourquoi c'est efficace.",
-     "LoRA (Low-Rank Adaptation) est une methode de fine-tuning parametre-efficace. Au lieu de "
-     "mettre a jour toute une matrice de poids W (des millions de parametres), on la gele et on "
-     "apprend une petite correction de rang faible : delta_W = B @ A, ou A et B sont deux "
-     "matrices bien plus petites (rang r, typiquement 8-64). Seuls A et B sont entraines, soit "
-     "souvent moins de 1% des parametres. Avantages : beaucoup moins de memoire et de calcul, "
-     "des adaptateurs legers (quelques Mo) que l'on peut echanger a volonte, et une base "
-     "partagee entre plusieurs taches. L'hypothese sous-jacente est que l'adaptation a une tache "
-     "vit dans un sous-espace de faible dimension. A l'inference, on peut fusionner delta_W dans "
-     "W sans surcout."),
-
-    ("deep-learning-llm",
-     "Qu'est-ce que la quantization 4-bit et QLoRA ?",
-     "La quantization reduit la precision des poids (ex. de 16 bits a 4 bits) pour diviser "
-     "l'empreinte memoire par ~4, au prix d'une legere perte de precision. QLoRA combine deux "
-     "idees : (1) charger le modele de base quantise en 4-bit (format NF4, optimise pour des "
-     "poids distribues normalement) et le geler ; (2) entrainer par-dessus des adaptateurs LoRA "
-     "en precision plus haute. Astuces cles : la 'double quantization' compresse aussi les "
-     "constantes de quantization, et un optimiseur pagine gere les pics memoire. Resultat : on "
-     "peut fine-tuner un modele de 7B (voire plus) sur un seul GPU grand public, ce qui etait "
-     "impossible en pleine precision. C'est exactement l'approche de ce projet sur une RTX 4070."),
-
-    ("deep-learning-llm",
-     "Comment fonctionne le mecanisme d'attention dans un Transformer ?",
-     "L'attention permet a chaque token de ponderer l'importance des autres tokens pour "
-     "construire sa representation. Chaque token produit trois vecteurs : une Query (ce qu'il "
-     "cherche), une Key (ce qu'il offre) et une Value (l'information a transmettre). On calcule "
-     "des scores par produit scalaire Query-Key, on les normalise par softmax (apres division "
-     "par racine de la dimension, pour stabiliser), puis on fait une moyenne ponderee des "
-     "Values. La 'multi-head attention' repete ce procede en parallele sur plusieurs "
-     "sous-espaces pour capter differents types de relations. C'est ce qui donne au Transformer "
-     "sa capacite a modeliser des dependances a longue portee, contrairement aux RNN, et a "
-     "paralleliser le calcul sur toute la sequence."),
-
-    ("deep-learning-llm",
-     "Qu'est-ce qu'un embedding et a quoi ca sert ?",
-     "Un embedding est une representation vectorielle dense d'un objet (mot, phrase, image, "
-     "utilisateur) dans un espace continu, ou la proximite geometrique reflete une similarite "
-     "semantique. Au lieu de traiter les mots comme des symboles isoles (one-hot), on les place "
-     "dans un espace ou 'roi' et 'reine' sont proches. Utilite : recherche semantique, "
-     "clustering, systemes de recommandation, et surtout entree des reseaux de neurones qui "
-     "operent sur des vecteurs. Dans un RAG, on encode documents et requetes en embeddings puis "
-     "on recupere les documents dont l'embedding est le plus proche (souvent par similarite "
-     "cosinus). Les embeddings modernes sont appris par des modeles dedies et capturent un "
-     "contexte riche."),
-
-    ("deep-learning-llm",
-     "Quelle est la difference entre les parametres temperature et top_p en generation ?",
-     "Les deux controlent le hasard de l'echantillonnage, mais differemment. La temperature "
-     "reechelonne la distribution des probabilites avant l'echantillonnage : proche de 0, la "
-     "sortie devient quasi deterministe (le modele choisit le token le plus probable) ; au-dela "
-     "de 1, elle devient plus aleatoire et creative. Le top_p (nucleus sampling) restreint le "
-     "choix au plus petit ensemble de tokens dont la probabilite cumulee atteint p (ex. 0,9), "
-     "eliminant la longue traine improbable. En pratique on ajuste souvent l'un OU l'autre : "
-     "temperature ~0,7 et top_p ~0,9 pour un bon compromis, ou temperature basse pour des taches "
-     "factuelles/deterministes (code, extraction). Les combiner permet un controle fin."),
-
-    ("deep-learning-llm",
-     "Qu'est-ce qu'un token et pourquoi le nombre de tokens compte-t-il ?",
-     "Un token est l'unite de base traitee par un LLM : souvent un morceau de mot (sous-mot), "
-     "pas forcement un mot entier. Un tokenizer (ex. BPE) decoupe le texte en tokens selon un "
-     "vocabulaire appris ; en anglais, un token vaut environ 4 caracteres, soit ~0,75 mot. Le "
-     "nombre de tokens compte pour trois raisons : (1) la fenetre de contexte est limitee "
-     "(entree + sortie plafonnees) ; (2) la facturation des API se fait au token ; (3) le cout "
-     "de calcul de l'attention croit avec la longueur de sequence. D'ou l'importance de prompts "
-     "concis et, pour l'entrainement, d'un `max_seq_length` bien choisi pour equilibrer "
-     "couverture et memoire."),
-
-    ("deep-learning-llm",
-     "Pourquoi masque-t-on le prompt lors du calcul de la loss en fine-tuning instruct ?",
-     "En fine-tuning d'instruction, on ne veut apprendre au modele qu'a GENERER la reponse, pas "
-     "a reproduire la question qu'on lui a deja fournie. On met donc les labels des tokens du "
-     "prompt (instruction systeme + question de l'utilisateur) a -100, valeur ignoree par la "
-     "cross-entropy de PyTorch, de sorte que seule la partie reponse contribue au gradient. "
-     "Sans ce masquage, le modele depense de la capacite a modeliser les questions, ce qui "
-     "dilue le signal utile et peut degrader la qualite des reponses. C'est precisement ce que "
-     "fait le collateur de donnees de ce projet : construire la sequence complete via le chat "
-     "template, puis masquer tout ce qui precede le debut de la reponse de l'assistant."),
-
-    ("deep-learning-llm",
-     "Qu'est-ce que le gradient checkpointing et quel est son compromis ?",
-     "Le gradient checkpointing est une technique d'economie de memoire pendant l'entrainement. "
-     "Normalement, on stocke toutes les activations de la passe avant pour calculer les "
-     "gradients a la passe arriere. Avec le checkpointing, on n'en garde que quelques-unes "
-     "(points de controle) et on RECALCULE les autres a la volee pendant la retropropagation. "
-     "Compromis : on echange du temps de calcul (une passe avant supplementaire, +20-30% de "
-     "temps) contre une forte reduction de memoire (souvent -60-70% sur les activations). C'est "
-     "indispensable pour entrainer de gros modeles sur un GPU a memoire limitee, comme dans ce "
-     "projet ou il est active pour tenir dans les 8 Go de la RTX 4070."),
-
-    # ----------------------- Evaluation / metriques -----------------------
-    ("evaluation",
-     "Qu'est-ce que le score BLEU et quelles sont ses limites ?",
-     "BLEU (Bilingual Evaluation Understudy) mesure la similarite entre un texte genere et une "
-     "ou plusieurs references, en comparant les n-grammes communs (precision sur 1 a 4 grammes), "
-     "avec une penalite de brievete pour eviter les sorties trop courtes. Il varie de 0 a 1 (ou "
-     "0-100). Limites : il est purement lexical et ne capte pas les synonymes ni le sens (une "
-     "bonne paraphrase peut avoir un BLEU faible) ; il est peu fiable sur de courtes sequences "
-     "et sensible au nombre de references. Concu pour la traduction, il est imparfait pour du "
-     "Q&A ouvert. On le complete donc par ROUGE, des metriques semantiques (BERTScore) ou une "
-     "evaluation humaine / par un LLM-juge."),
-
-    ("evaluation",
-     "Qu'est-ce que le score ROUGE ?",
-     "ROUGE (Recall-Oriented Understudy for Gisting Evaluation) est une famille de metriques "
-     "orientees rappel, surtout utilisee pour le resume. ROUGE-N compte le recouvrement de "
-     "n-grammes entre generation et reference ; ROUGE-L se base sur la plus longue sous-sequence "
-     "commune (LCS), capturant l'ordre sans exiger la contiguite. Contrairement a BLEU (oriente "
-     "precision), ROUGE privilegie le rappel : a-t-on couvert le contenu de la reference ? On "
-     "rapporte souvent le F-mesure (compromis precision/rappel). Memes limites que BLEU : "
-     "purement lexical, aveugle aux synonymes. Utile comme signal automatique rapide et bon "
-     "marche, mais a completer par une evaluation semantique ou humaine pour juger la qualite "
-     "reelle."),
-
-    ("evaluation",
-     "Qu'est-ce que la perplexite d'un modele de langage ?",
-     "La perplexite mesure a quel point un modele de langage est 'surpris' par un texte : c'est "
-     "l'exponentielle de la loss moyenne (cross-entropy) par token. Intuitivement, elle "
-     "represente le nombre effectif de choix equiprobables que le modele hesite a chaque token — "
-     "plus elle est basse, mieux le modele predit la suite. Une perplexite de 10 signifie qu'en "
-     "moyenne le modele est aussi indecis que face a 10 options equiprobables. C'est une metrique "
-     "intrinseque, pratique pour comparer des modeles sur un meme corpus ou suivre l'entrainement. "
-     "Limite : une faible perplexite n'implique pas des reponses utiles ou correctes pour une "
-     "tache donnee ; elle mesure la modelisation du langage, pas la qualite d'usage."),
-
-    ("evaluation",
-     "Comment evaluer un LLM fine-tune au-dela de BLEU et ROUGE ?",
-     "Les metriques lexicales ne suffisent pas pour du texte ouvert. On combine plusieurs "
-     "approches : (1) metriques semantiques comme BERTScore, qui comparent des embeddings plutot "
-     "que des mots exacts ; (2) LLM-as-a-judge, ou un modele fort note les reponses selon des "
-     "criteres (exactitude, pertinence, style) — rapide et correle a l'humain, mais a calibrer ; "
-     "(3) evaluation humaine sur un echantillon, l'etalon-or mais couteux ; (4) benchmarks de "
-     "tache specifiques et tests de regression sur des prompts de reference ; (5) verifications "
-     "factuelles et detection d'hallucinations. L'ideal est un tableau de bord melant un signal "
-     "automatique bon marche (suivi continu) et des revues qualitatives periodiques."),
-
-    # ----------------------- MLOps / deploiement -----------------------
-    ("mlops",
-     "Pourquoi fusionner (merge) les poids LoRA avant le deploiement ?",
-     "Pendant l'entrainement, l'adaptateur LoRA reste separe du modele de base (deux ensembles "
-     "de poids). Pour le deploiement, on peut fusionner delta_W = B@A dans les poids d'origine "
-     "avec `merge_and_unload()`, obtenant un modele standard autonome. Avantages : (1) l'inference "
-     "est plus simple et legerement plus rapide (pas de calcul d'adaptateur separe) ; (2) le "
-     "modele fusionne est un checkpoint classique, compatible avec des outils comme llama.cpp/"
-     "Ollama ou l'export GGUF ; (3) plus de dependance a la bibliotheque PEFT au runtime. "
-     "Inconvenient : on perd la modularite (impossible d'echanger l'adaptateur) et le fichier "
-     "est bien plus gros. On garde donc souvent l'adaptateur pour l'experimentation, et on "
-     "fusionne pour la production."),
-
-    ("mlops",
-     "Qu'est-ce que le format GGUF et Ollama ?",
-     "GGUF est un format de fichier concu pour executer des LLM efficacement sur CPU/GPU grand "
-     "public, notamment via llama.cpp. Il stocke poids quantises et metadonnees dans un seul "
-     "fichier portable, avec differents niveaux de quantization (ex. Q4_K_M pour un bon "
-     "compromis taille/qualite). Ollama est un outil qui simplifie l'execution locale de LLM : "
-     "il gere le telechargement, la quantization GGUF et sert une API locale. On decrit le "
-     "modele dans un `Modelfile` (fichier de base, parametres, prompt template) puis "
-     "`ollama create` et `ollama run`. C'est ideal pour deployer localement un modele fine-tune "
-     "et fusionne, sans GPU serveur ni dependances Python lourdes."),
-
-    ("mlops",
-     "Comment servir un modele fine-tune via une API ?",
-     "Le schema classique : un serveur web (FastAPI) charge le modele UNE fois au demarrage puis "
-     "expose un endpoint `/generate` qui recoit un prompt et renvoie la generation. Bonnes "
-     "pratiques : charger le modele au startup (pas a chaque requete) ; valider les entrees avec "
-     "Pydantic ; borner `max_new_tokens` ; ajouter un endpoint `/health`. Pour la production a "
-     "forte charge, on prefere un moteur d'inference optimise comme vLLM ou TGI, qui apportent "
-     "le batching continu, le PagedAttention et un bien meilleur debit que `model.generate` en "
-     "boucle. On conteneurise ensuite (Docker) et on deploie derriere un reverse proxy, avec "
-     "monitoring de la latence et du taux d'erreur."),
-
-    ("mlops",
-     "Qu'est-ce que le suivi d'experiences (experiment tracking) et pourquoi est-ce important ?",
-     "Le suivi d'experiences consiste a enregistrer systematiquement, pour chaque run "
-     "d'entrainement, les hyperparametres, les metriques au fil du temps (loss, eval), les "
-     "artefacts (checkpoints) et l'environnement. Des outils comme TensorBoard, Weights & Biases "
-     "ou MLflow centralisent ces informations. Pourquoi c'est crucial : la reproductibilite "
-     "(retrouver exactement quelle config a produit quel resultat), la comparaison objective de "
-     "plusieurs runs, le debogage (reperer une divergence de loss), et la collaboration. Sans "
-     "tracking, on retombe vite dans le 'ca marchait la semaine derniere'. Dans ce projet, "
-     "TensorBoard journalise la loss d'entrainement et de validation, ce qui permet de detecter "
-     "l'overfitting et de choisir le meilleur checkpoint."),
-
-    ("mlops",
-     "Qu'est-ce que le batch effectif et le gradient accumulation ?",
-     "Le batch effectif est le nombre reel d'exemples qui contribuent a une mise a jour des "
-     "poids. Quand la memoire GPU ne permet pas un grand batch, on utilise l'accumulation de "
-     "gradient : on effectue plusieurs micro-batchs, on additionne leurs gradients, et on ne met "
-     "a jour les poids qu'apres N micro-batchs. Le batch effectif vaut alors "
-     "per_device_batch_size x gradient_accumulation_steps x nombre_de_GPU. Interet : simuler un "
-     "grand batch (entrainement plus stable) sans depasser la VRAM. Dans ce projet, un batch "
-     "physique de 1 combine a 16 pas d'accumulation donne un batch effectif de 16, tout en "
-     "tenant dans 8 Go. Compromis : c'est un peu plus lent car les mises a jour sont moins "
-     "frequentes."),
-
-    # ----------------------- Data engineering -----------------------
-    ("data-engineering",
-     "Pourquoi et comment nettoyer un jeu de donnees avant l'entrainement ?",
-     "La qualite des donnees plafonne la qualite du modele ('garbage in, garbage out'). Le "
-     "nettoyage vise a : supprimer les doublons (qui biaisent l'apprentissage et faussent "
-     "l'evaluation s'ils traversent le split), retirer les exemples trop courts/vides ou mal "
-     "formes, normaliser l'encodage et les espaces, filtrer le contenu hors-domaine ou "
-     "toxique, et harmoniser le format. Pour un dataset d'instruction, on verifie que chaque "
-     "paire a bien une instruction ET une reponse non triviales. On documente chaque regle et le "
-     "nombre d'exemples ecartes, pour la tracabilite. C'est exactement le role du script "
-     "`prepare_dataset.py` de ce projet, qui valide, deduplique, puis formate en JSONL avant le "
-     "decoupage train/val/test."),
-
-    ("data-engineering",
-     "Qu'est-ce que la fuite de donnees (data leakage) et comment l'eviter ?",
-     "La fuite de donnees survient quand de l'information indisponible au moment de la prediction "
-     "reelle se glisse dans l'entrainement, gonflant artificiellement les performances. Exemples "
-     "typiques : normaliser/encoder sur l'ensemble complet AVANT le split (les stats du test "
-     "fuient dans le train) ; avoir le meme exemple ou des quasi-doublons dans train et test ; "
-     "utiliser une feature qui encode indirectement la cible ; sur des series temporelles, "
-     "melanger passe et futur. Preventions : toujours splitter d'abord, apprendre les "
-     "transformations sur le seul train (via un Pipeline scikit-learn), dedupliquer avant le "
-     "split, et respecter l'ordre chronologique. Un score anormalement parfait est souvent le "
-     "symptome d'une fuite."),
-
-    ("data-engineering",
-     "Pourquoi preferer le format Parquet au CSV pour de gros volumes ?",
-     "Parquet est un format colonnaire binaire, la ou le CSV est un format texte ligne par "
-     "ligne. Avantages de Parquet : (1) stockage colonnaire, donc on ne lit que les colonnes "
-     "necessaires (moins d'I/O) ; (2) compression efficace par colonne (donnees homogenes) ; "
-     "(3) types preserves (pas de reparsing des dates/nombres, contrairement au CSV) ; (4) "
-     "metadonnees et schema embarques. Resultat : des fichiers plus petits et une lecture "
-     "souvent 5 a 30x plus rapide sur de gros jeux. Le CSV reste utile pour l'interoperabilite "
-     "et l'inspection humaine, mais pour un pipeline de donnees performant, Parquet (ou Arrow) "
-     "est le choix par defaut."),
-
-    ("data-engineering",
-     "Comment structurer un dataset pour le fine-tuning d'instruction ?",
-     "Le format le plus courant est une liste de paires instruction/reponse, souvent au schema "
-     "'Alpaca' : `{instruction, input (optionnel), output}`. Au moment de l'entrainement, on "
-     "assemble ces champs via le CHAT TEMPLATE du modele cible (ChatML pour Qwen, [INST] pour "
-     "Mistral, etc.), car chaque modele attend un formatage precis des tours systeme/"
-     "utilisateur/assistant. Bonnes pratiques : des instructions variees et representatives de "
-     "l'usage reel, des reponses de qualite et coherentes en style, une longueur maitrisee, et "
-     "un stockage en JSONL (une ligne = un exemple) pratique a streamer. On separe ensuite en "
-     "train/val/test. C'est l'architecture retenue ici : corpus brut JSON -> validation -> "
-     "template ChatML -> JSONL splitte."),
-]
-
-
-# ============================================================================
-#  AUGMENTATION LEGERE : reformulations de questions (paraphrases)
-#  Les reponses restent identiques ; on diversifie la formulation de la
-#  question pour rendre le modele robuste au phrasing. Transparent et borne.
-# ============================================================================
-
-# Prefixes de reformulation. On en applique un sous-ensemble aleatoire par
-# question pour eviter une explosion combinatoire et garder de la diversite.
-PARAPHRASE_TEMPLATES = [
-    "Peux-tu m'expliquer : {q}",
-    "J'aimerais comprendre. {q}",
-    "Explique simplement : {q}",
-    "En quelques phrases, {ql}",
-    "Pour un entretien technique : {q}",
-]
-
-MAX_PARAPHRASES_PER_ITEM = 2  # en plus de l'original
-
-
-def _lower_first(s: str) -> str:
-    return s[0].lower() + s[1:] if s else s
-
-
-def build_dataset() -> list[dict]:
-    rng = random.Random(SEED)
-    items: list[dict] = []
-
-    for category, question, answer in CORPUS:
-        # 1) Question originale
+    items = []
+    for i, entry in enumerate(entries):
+        instruction = normalize_text(entry["instruction"].strip())
+        output = normalize_text(entry["output"].strip())
         items.append({
-            "instruction": question,
-            "input": "",
-            "output": answer,
+            # group_id = unite INDIVISIBLE au moment du split.
+            # Toutes les variantes d'un concept partagent ce meme id.
+            "group_id": f"{category}-{i:03d}",
             "category": category,
+            "instruction": instruction,
+            "input": entry.get("input", ""),
+            "output": output,
         })
-
-        # 2) Quelques paraphrases (sous-ensemble aleatoire, deterministe)
-        templates = rng.sample(
-            PARAPHRASE_TEMPLATES,
-            k=min(MAX_PARAPHRASES_PER_ITEM, len(PARAPHRASE_TEMPLATES)),
-        )
-        for tpl in templates:
-            paraphrased = tpl.format(q=question, ql=_lower_first(question))
-            items.append({
-                "instruction": paraphrased,
-                "input": "",
-                "output": answer,
-                "category": category,
-            })
-
-    rng.shuffle(items)
     return items
 
 
 def main() -> None:
+    if not CORPUS_DIR.exists():
+        raise SystemExit(f"Dossier corpus introuvable : {CORPUS_DIR}")
+
+    files = sorted(CORPUS_DIR.glob("*.json"))
+    if not files:
+        raise SystemExit(f"Aucun fichier .json dans {CORPUS_DIR}")
+
+    all_items: list[dict] = []
+    per_category: dict[str, int] = {}
+
+    for path in files:
+        items = load_category(path)
+        all_items.extend(items)
+        per_category[items[0]["category"]] = len(items)
+
+    # Garde-fou : les group_id doivent etre uniques
+    ids = [it["group_id"] for it in all_items]
+    if len(ids) != len(set(ids)):
+        raise SystemExit("group_id dupliques — verifier les fichiers de corpus.")
+
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data = build_dataset()
-
     with open(OUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(all_items, f, ensure_ascii=False, indent=2)
 
-    # Statistiques
-    n_curated = len(CORPUS)
-    n_total = len(data)
-    cats: dict[str, int] = {}
-    for it in data:
-        cats[it["category"]] = cats.get(it["category"], 0) + 1
-
-    print(f"Corpus cure          : {n_curated} paires distinctes")
-    print(f"Apres augmentation   : {n_total} exemples (x{n_total / n_curated:.1f})")
-    print(f"Ecrit dans           : {OUT_FILE}")
-    print("\nRepartition par categorie :")
-    for cat, n in sorted(cats.items(), key=lambda kv: -kv[1]):
+    print(f"Concepts cures : {len(all_items)}")
+    print(f"Ecrit dans     : {OUT_FILE}\n")
+    print("Repartition par categorie :")
+    for cat, n in sorted(per_category.items(), key=lambda kv: -kv[1]):
         print(f"  {cat:22s} {n:4d}")
 
 

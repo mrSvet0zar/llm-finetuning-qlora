@@ -1,15 +1,22 @@
 """
-Preparation du dataset : validation -> deduplication -> split -> JSONL.
+Preparation du dataset : validation -> split PAR GROUPE -> augmentation du train.
 
-Entree  : data/raw/raw_qa_data.json  (genere par scripts/generate_dataset.py)
+Ordre des operations (l'ordre EST la correction methodologique) :
+
+    1. valider et dedupliquer
+    2. decouper train/val/test PAR GROUPE  (un concept = un groupe indivisible)
+    3. augmenter le TRAIN uniquement (reformulations de questions)
+    4. verifier l'absence de fuite  -> echec bloquant si detectee
+
+Pourquoi : chaque concept possede une reponse de reference unique. Si l'on
+augmentait AVANT le decoupage, les reformulations d'une meme question se
+retrouveraient de part et d'autre du split, avec la MEME reponse cible : le
+modele serait alors evalue sur des reponses vues en entrainement, ce qui
+mesure de la memorisation et gonfle les scores. C'est le defaut qui affectait
+la v1 de ce projet (8/8 des exemples de test etaient concernes).
+
+Entree  : data/raw/raw_qa_data.json   (genere par scripts/generate_dataset.py)
 Sortie  : data/processed/{train,val,test}.jsonl
-
-Chaque ligne de sortie conserve les champs STRUCTURES :
-    {"instruction": ..., "input": ..., "output": ..., "category": ...}
-
-On NE bake PAS le chat template ici : c'est train.py qui l'applique, afin de
-garder la frontiere prompt/reponse et de permettre le masquage du prompt dans
-le calcul de la loss. On ecrit tout de meme un apercu formate pour inspection.
 
 Usage :
     python prepare_dataset.py
@@ -20,46 +27,60 @@ import json
 import random
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
-# Rendre src importable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.config import Config  # noqa: E402
 
 
+# --------------------------------------------------------------------------
+#  Reformulations appliquees AU TRAIN UNIQUEMENT
+# --------------------------------------------------------------------------
+PARAPHRASE_TEMPLATES = [
+    "Peux-tu m'expliquer : {q}",
+    "J'aimerais comprendre. {q}",
+    "Explique simplement : {q}",
+    "En quelques phrases, {ql}",
+    "Pour un entretien technique : {q}",
+]
+MAX_PARAPHRASES = 2  # en plus de la question originale
+
+
+def _lower_first(s: str) -> str:
+    return s[0].lower() + s[1:] if s else s
+
+
+def _normalize(text: str) -> str:
+    """Normalisation pour comparaison (doublons, detection de fuite)."""
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+# --------------------------------------------------------------------------
+#  1. Validation
+# --------------------------------------------------------------------------
 def load_raw_data(source_file: str) -> list[dict]:
     with open(source_file, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def _normalize(text: str) -> str:
-    """Normalisation pour la detection de doublons."""
-    return re.sub(r"\s+", " ", text.strip().lower())
-
-
 def validate_and_dedup(data: list[dict], cfg: Config) -> list[dict]:
-    """Valide les champs, filtre les exemples trop courts, deduplique."""
     validated: list[dict] = []
     seen: set[str] = set()
-
     n_missing = n_short = n_dup = 0
 
     for item in data:
         instruction = (item.get("instruction") or "").strip()
         output = (item.get("output") or "").strip()
 
-        # Champs requis
         if not instruction or not output:
             n_missing += 1
             continue
-
-        # Longueurs minimales
         if (len(instruction) < cfg.data.min_instruction_len
                 or len(output) < cfg.data.min_output_len):
             n_short += 1
             continue
 
-        # Deduplication sur l'instruction normalisee
         key = _normalize(instruction)
         if key in seen:
             n_dup += 1
@@ -67,37 +88,126 @@ def validate_and_dedup(data: list[dict], cfg: Config) -> list[dict]:
         seen.add(key)
 
         validated.append({
+            "group_id": item.get("group_id") or f"auto-{_normalize(output)[:40]}",
+            "category": item.get("category", "unknown"),
             "instruction": instruction,
             "input": (item.get("input") or "").strip(),
             "output": output,
-            "category": item.get("category", "unknown"),
         })
 
-    print("Validation :")
-    print(f"  - entrees brutes        : {len(data)}")
-    print(f"  - champs manquants      : {n_missing}")
-    print(f"  - trop courtes          : {n_short}")
-    print(f"  - doublons              : {n_dup}")
-    print(f"  - retenues              : {len(validated)}")
+    print("1. Validation")
+    print(f"   entrees brutes   : {len(data)}")
+    print(f"   champs manquants : {n_missing}")
+    print(f"   trop courtes     : {n_short}")
+    print(f"   doublons         : {n_dup}")
+    print(f"   retenues         : {len(validated)}")
     return validated
 
 
-def split_data(data: list[dict], cfg: Config) -> tuple[list, list, list]:
-    """Decoupe en train/val/test de facon deterministe."""
+# --------------------------------------------------------------------------
+#  2. Split PAR GROUPE
+# --------------------------------------------------------------------------
+def group_aware_split(data: list[dict], cfg: Config) -> tuple[list, list, list]:
+    """Decoupe en train/val/test sans jamais scinder un groupe, ET en
+    stratifiant par categorie.
+
+    Deux garanties :
+      * GROUPE  : un `group_id` (= un concept et sa reponse de reference) est
+        attribue entierement a un seul split (cf. GroupShuffleSplit).
+      * STRATIFICATION : le decoupage est applique categorie par categorie, de
+        sorte que chaque split couvre les 7 domaines proportionnellement. Sans
+        cela, une categorie entiere peut disparaitre du test par hasard et
+        l'evaluation n'est plus representative.
+    """
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for item in data:
+        groups[item["group_id"]].append(item)
+
+    # Regroupe les identifiants de groupe par categorie
+    by_category: dict[str, list[str]] = defaultdict(list)
+    for gid, items in groups.items():
+        by_category[items[0]["category"]].append(gid)
+
     rng = random.Random(cfg.data.seed)
-    data = data.copy()
-    rng.shuffle(data)
+    split_ids: dict[str, list[str]] = {"train": [], "val": [], "test": []}
 
-    n = len(data)
-    n_train = int(n * cfg.data.train_ratio)
-    n_val = int(n * cfg.data.val_ratio)
+    for category in sorted(by_category):        # tri = determinisme
+        gids = sorted(by_category[category])
+        rng.shuffle(gids)
+        n = len(gids)
+        n_train = int(n * cfg.data.train_ratio)
+        n_val = int(n * cfg.data.val_ratio)
+        split_ids["train"] += gids[:n_train]
+        split_ids["val"] += gids[n_train:n_train + n_val]
+        split_ids["test"] += gids[n_train + n_val:]
 
-    train = data[:n_train]
-    val = data[n_train:n_train + n_val]
-    test = data[n_train + n_val:]
-    return train, val, test
+    out = {name: [item for gid in ids for item in groups[gid]]
+           for name, ids in split_ids.items()}
+
+    print("\n2. Split par groupe (stratifie par categorie)")
+    print(f"   concepts (groupes) : {len(groups)}")
+    for name in ("train", "val", "test"):
+        n_cats = len({groups[g][0]['category'] for g in split_ids[name]})
+        print(f"   {name:5s} : {len(split_ids[name]):3d} concepts "
+              f"-> {len(out[name]):3d} exemples | {n_cats}/7 categories")
+    return out["train"], out["val"], out["test"]
 
 
+# --------------------------------------------------------------------------
+#  3. Augmentation du TRAIN uniquement
+# --------------------------------------------------------------------------
+def augment(items: list[dict], cfg: Config) -> list[dict]:
+    rng = random.Random(cfg.data.seed)
+    augmented: list[dict] = []
+
+    for item in items:
+        augmented.append({**item, "variant": "original"})
+        templates = rng.sample(PARAPHRASE_TEMPLATES,
+                               k=min(MAX_PARAPHRASES, len(PARAPHRASE_TEMPLATES)))
+        for tpl in templates:
+            augmented.append({
+                **item,
+                "instruction": tpl.format(q=item["instruction"],
+                                          ql=_lower_first(item["instruction"])),
+                "variant": "paraphrase",
+            })
+
+    rng.shuffle(augmented)
+    print("\n3. Augmentation (train uniquement)")
+    print(f"   {len(items)} -> {len(augmented)} exemples "
+          f"(x{len(augmented)/max(len(items),1):.1f})")
+    return augmented
+
+
+# --------------------------------------------------------------------------
+#  4. Verification anti-fuite (bloquante)
+# --------------------------------------------------------------------------
+def assert_no_leakage(train: list[dict], val: list[dict], test: list[dict]) -> None:
+    """Echoue si un groupe ou une reponse de reference traverse le split."""
+    print("\n4. Verification anti-fuite")
+    problems: list[str] = []
+
+    g_train = {i["group_id"] for i in train}
+    o_train = {_normalize(i["output"]) for i in train}
+
+    for name, split in (("val", val), ("test", test)):
+        g_overlap = g_train & {i["group_id"] for i in split}
+        o_overlap = [i for i in split if _normalize(i["output"]) in o_train]
+
+        print(f"   {name:5s} : groupes partages avec train = {len(g_overlap)} | "
+              f"reponses deja vues = {len(o_overlap)}/{len(split)}")
+        if g_overlap:
+            problems.append(f"{len(g_overlap)} group_id partages entre train et {name}")
+        if o_overlap:
+            problems.append(
+                f"{len(o_overlap)} reponses de {name} presentes dans le train")
+
+    if problems:
+        raise SystemExit("FUITE DE DONNEES DETECTEE :\n  - " + "\n  - ".join(problems))
+    print("   OK — aucun groupe ni aucune reponse partages.")
+
+
+# --------------------------------------------------------------------------
 def write_jsonl(items: list[dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -107,25 +217,26 @@ def write_jsonl(items: list[dict], path: Path) -> None:
 
 def main() -> None:
     cfg = Config()
-    random.seed(cfg.data.seed)
-
     print(f"Chargement : {cfg.data.raw_file}\n")
     raw = load_raw_data(cfg.data.raw_file)
 
     validated = validate_and_dedup(raw, cfg)
-    train, val, test = split_data(validated, cfg)
+    train, val, test = group_aware_split(validated, cfg)
+
+    # L'augmentation vient APRES le split, et seulement sur le train.
+    train = augment(train, cfg)
+
+    assert_no_leakage(train, val, test)
 
     processed = Path(cfg.data.processed_dir)
     write_jsonl(train, processed / "train.jsonl")
     write_jsonl(val, processed / "val.jsonl")
     write_jsonl(test, processed / "test.jsonl")
 
-    total = len(validated)
-    print("\nSplit :")
-    print(f"  train : {len(train):4d} ({len(train)/total*100:.0f}%)")
-    print(f"  val   : {len(val):4d} ({len(val)/total*100:.0f}%)")
-    print(f"  test  : {len(test):4d} ({len(test)/total*100:.0f}%)")
     print(f"\nFichiers ecrits dans : {processed}")
+    print(f"  train : {len(train):4d} exemples")
+    print(f"  val   : {len(val):4d} exemples")
+    print(f"  test  : {len(test):4d} exemples")
 
 
 if __name__ == "__main__":

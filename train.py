@@ -31,6 +31,7 @@ from transformers import (
     BitsAndBytesConfig,
     TrainingArguments,
     Trainer,
+    EarlyStoppingCallback,
     set_seed,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -231,6 +232,8 @@ def main() -> None:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=CausalCollator(pad_token_id=tokenizer.pad_token_id),
+        callbacks=[EarlyStoppingCallback(
+            early_stopping_patience=cfg.train.early_stopping_patience)],
     )
 
     print("\n=== Debut de l'entrainement ===")

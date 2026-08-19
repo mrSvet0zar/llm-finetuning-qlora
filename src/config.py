@@ -25,9 +25,12 @@ class DataConfig:
     raw_file: str = str(PROJECT_ROOT / "data" / "raw" / "raw_qa_data.json")
     processed_dir: str = str(PROJECT_ROOT / "data" / "processed")
 
-    train_ratio: float = 0.85
-    val_ratio: float = 0.10
-    # test_ratio est le reste (0.05)
+    # Ratios appliques aux GROUPES (concepts), pas aux lignes.
+    # 70/15/15 : le test conserve assez de concepts distincts pour que la
+    # metrique ait un sens (voir prepare_dataset.py).
+    train_ratio: float = 0.70
+    val_ratio: float = 0.15
+    # test_ratio est le reste (~0.15)
 
     min_instruction_len: int = 10
     min_output_len: int = 20
@@ -82,23 +85,26 @@ class TrainConfig:
 
     learning_rate: float = 2e-4
     lr_scheduler_type: str = "cosine"
-    warmup_steps: int = 2  # transformers 5.x : warmup_ratio retire, on fixe les steps
+    warmup_steps: int = 5  # transformers 5.x : warmup_ratio retire, on fixe les steps
     weight_decay: float = 0.01
     max_grad_norm: float = 0.3
 
     optim: str = "paged_adamw_8bit"        # optimiseur pagine (economie VRAM)
     gradient_checkpointing: bool = True
 
-    # Dataset compact -> ~7 steps/epoch : cadence d'eval/save resserree.
-    logging_steps: int = 2
+    # ~16 steps/epoch (264 exemples / batch effectif 16) -> ~49 steps au total.
+    logging_steps: int = 5
     eval_strategy: str = "steps"
-    eval_steps: int = 5
+    eval_steps: int = 8
     save_strategy: str = "steps"
-    save_steps: int = 5  # doit etre un multiple de eval_steps (load_best_model_at_end)
+    save_steps: int = 8  # doit etre un multiple de eval_steps (load_best_model_at_end)
     save_total_limit: int = 2
     load_best_model_at_end: bool = True
     metric_for_best_model: str = "eval_loss"
     greater_is_better: bool = False
+    # Une fois la fuite corrigee, la loss de validation remonte des ~1 epoch :
+    # on arrete si elle ne s'ameliore plus pendant N evaluations consecutives.
+    early_stopping_patience: int = 2
 
     # "tensorboard" par defaut (zero login). Mettre "wandb" si configure.
     report_to: str = "tensorboard"
