@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-finetuning-qlora"
+version = "0.2.0"
+description = "Fine-tuning QLoRA de Qwen2.5-3B en assistant Python/Data Science/ML"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Milan Ganivet" }]
+keywords = ["llm", "fine-tuning", "qlora", "lora", "peft", "nlp"]
+
+# Dependances de la LOGIQUE PURE uniquement (metriques, preparation des
+# donnees, retrieval). Volontairement sans torch/transformers : c'est ce qui
+# permet a la CI de s'installer en quelques secondes, sans GPU.
+# La pile d'entrainement complete est dans requirements.txt.
+dependencies = [
+    "rouge-score>=0.1.2",
+    "sacrebleu>=2.4.0",
+    "scikit-learn>=1.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Repository = "https://github.com/mrSvet0zar/llm-finetuning-qlora"
+
+[tool.setuptools]
+packages = ["src"]
+
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+markers = [
+    "slow: necessite le telechargement d'un tokenizer/modele (exclu de la CI)",
+    "gpu: necessite un GPU CUDA",
+]
+
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 90
+target-version = "py310"
+exclude = [".venv", "outputs", "notebooks"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # comprehensions
+]
+ignore = [
+    "E402",  # imports apres sys.path.insert : necessaire pour les scripts
+    "E501",  # longueur de ligne geree par line-length
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Les scripts manipulent sys.path avant d'importer le projet.
+"scripts/*.py" = ["E402"]
+"tests/*.py" = ["E402"]

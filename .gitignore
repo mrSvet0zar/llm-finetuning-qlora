@@ -27,5 +27,13 @@ wandb/
 # Claude Code (local)
 .claude/
 
+# Outillage
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.hf-cache/
+
 # On garde les datasets (petits) pour la reproductibilite :
 # data/raw/ et data/processed/ ne sont PAS ignores.

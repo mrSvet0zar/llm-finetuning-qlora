@@ -44,17 +44,16 @@ import sys
 from pathlib import Path
 
 import torch
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import Config                                    # noqa: E402
-from train import SYSTEM_PROMPT                                  # noqa: E402
-from inference import generate_from_messages, load_model         # noqa: E402
-from evaluate import compute_metrics, load_baseline              # noqa: E402
-
+from evaluate import load_baseline  # noqa: E402
+from inference import generate_from_messages, load_model  # noqa: E402
+from src.config import Config  # noqa: E402
+from src.metrics import compute_metrics  # noqa: E402
+from src.retrieval import TfidfRetriever  # noqa: E402
+from train import SYSTEM_PROMPT  # noqa: E402
 
 N_SHOTS = 3
 N_RETRIEVED = 3
@@ -63,7 +62,7 @@ MAX_NEW_TOKENS = 320
 
 def load_split(cfg: Config, name: str) -> list[dict]:
     path = Path(cfg.data.processed_dir) / f"{name}.jsonl"
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f]
 
 
@@ -101,46 +100,6 @@ def messages_rag(question: str, _shots, retriever) -> list[dict]:
             f"{context}\n\n"
             f"Question : {question}"},
     ]
-
-
-class TfidfRetriever:
-    """Recherche lexicale sur le corpus d'ENTRAINEMENT.
-
-    Deux points de conception importants :
-
-    * Analyseur au mot (1-2 grammes, sublinear_tf) plutot qu'au caractere.
-      Compare sur les vraies donnees, l'analyseur `char_wb` produisait des
-      similarites numeriquement plus elevees mais moins pertinentes : elles
-      etaient dominees par des sequences de caracteres courantes en francais
-      plutot que par le vocabulaire technique discriminant.
-
-    * DEDUPLICATION par `group_id`. Le train contient les reformulations de
-      chaque concept ; sans deduplication, le top-3 renvoyait trois variantes
-      du MEME concept, gaspillant deux tiers du contexte fourni au modele.
-    """
-
-    def __init__(self, docs: list[dict]):
-        self.docs = docs
-        corpus = [f"{d['instruction']} {d['output']}" for d in docs]
-        self.vectorizer = TfidfVectorizer(
-            analyzer="word", ngram_range=(1, 2), min_df=1, sublinear_tf=True,
-        )
-        self.matrix = self.vectorizer.fit_transform(corpus)
-
-    def query(self, question: str, k: int = 3) -> list[dict]:
-        vec = self.vectorizer.transform([question])
-        sims = cosine_similarity(vec, self.matrix)[0]
-        seen: set[str] = set()
-        out: list[dict] = []
-        for i in sims.argsort()[::-1]:
-            gid = self.docs[i].get("group_id")
-            if gid in seen:
-                continue
-            seen.add(gid)
-            out.append(self.docs[i])
-            if len(out) == k:
-                break
-        return out
 
 
 # ---------------------------------------------------------------------------

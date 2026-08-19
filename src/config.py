@@ -9,11 +9,9 @@ Cible : Qwen2.5-3B-Instruct, QLoRA 4-bit, RTX 4070 Laptop 8 Go, Windows.
 """
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-
 
 # Racine du projet (dossier parent de src/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

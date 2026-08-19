@@ -1,0 +1,27 @@
+# Poids et artefacts : jamais dans une image (plusieurs Go)
+outputs/
+*.gguf
+*.safetensors
+*.bin
+
+# Environnements et caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.hf-cache/
+
+# Historique et outillage de developpement
+.git/
+.github/
+.claude/
+notebooks/
+tests/
+data/
+
+# Documentation et divers
+*.md
+!README.md
+*.log

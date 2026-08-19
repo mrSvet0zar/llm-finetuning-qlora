@@ -30,15 +30,12 @@ FastAPI + Ollama).
 
 ### 📊 Résultats
 
-Évaluation sur un jeu de test **strictement disjoint** (24 concepts, aucune
-réponse partagée avec l'entraînement), fine-tuné **vs** modèle de base
-(`python evaluate.py --baseline`). Intervalles de confiance à 95 % obtenus par
-**bootstrap** (1000 rééchantillonnages) :
-
-Quatre approches comparées, **toutes avec la même connaissance disponible**
-(les 85 concepts d'entraînement) et la même procédure de décodage. Métriques
-avec accents normalisés des deux côtés (voir
-[l'artefact de mesure](#️-un-artefact-de-mesure--les-accents)) :
+Jeu de test **strictement disjoint** de l'entraînement (24 concepts, aucune
+réponse partagée). Quatre approches comparées, **toutes avec la même
+connaissance disponible** (les 85 concepts d'entraînement) et la même procédure
+de décodage — seul le mécanisme change. Intervalles de confiance à 95 % par
+**bootstrap** (1000 rééchantillonnages), accents normalisés des deux côtés
+(voir [l'artefact de mesure](#️-un-artefact-de-mesure--les-accents)) :
 
 | Approche | ROUGE-1 | ROUGE-L | BLEU |
 |---|---|---|---|
@@ -399,12 +396,77 @@ spécialise le modèle sans toucher à ses poids d'origine.
 
 ---
 
+## 🧪 Qualité logicielle
+
+[![CI](https://github.com/mrSvet0zar/llm-finetuning-qlora/actions/workflows/ci.yml/badge.svg)](https://github.com/mrSvet0zar/llm-finetuning-qlora/actions/workflows/ci.yml)
+
+| | |
+|---|---|
+| **Tests** | 42 tests, **98 % de couverture** sur `src/` |
+| **Durée** | **~4 s** — sans GPU ni téléchargement de modèle |
+| **Lint** | ruff (pycodestyle, pyflakes, isort, pyupgrade, bugbear) |
+| **CI** | GitHub Actions, matrice Python 3.10 / 3.12 |
+| **Reproductibilité** | `requirements.lock.txt` (162 versions figées) |
+
+### Une CI qui tourne en secondes, par conception
+
+Le code est séparé en deux couches :
+
+- **`src/metrics.py`, `src/retrieval.py`, `prepare_dataset.py`** — logique pure,
+  sans `torch` ni `transformers`
+- **`train.py`, `evaluate.py`, `inference.py`** — chargement de modèles, GPU
+
+La CI n'installe que la première (`pip install -e ".[dev]"`, trois dépendances).
+Elle valide donc la logique **critique** — découpage des données, métriques,
+retrieval — sans jamais toucher un GPU ni le Hugging Face Hub. Les tests
+nécessitant le tokenizer sont marqués `slow` et exclus (`pytest -m "not slow"`).
+
+### Le test qui compte
+
+```python
+def test_le_garde_fou_detecte_bien_une_fuite():
+    """Un controle qu'on n'a jamais vu echouer n'est pas un controle."""
+    train = [{"group_id": "g1", "instruction": "variante A", "output": "Reponse X"}]
+    test  = [{"group_id": "g1", "instruction": "variante B", "output": "Reponse X"}]
+    with pytest.raises(SystemExit, match="FUITE DE DONNEES"):
+        assert_no_leakage(train, [], test)
+```
+
+`tests/test_split.py` verrouille la correction du Tier 0 : si l'augmentation
+repassait un jour avant le découpage, **la CI échouerait**. Un second job rejoue
+le pipeline de données complet sur le vrai corpus et vérifie que les splits
+n'ont pas bougé (`git diff --exit-code data/processed/`).
+
+> Deux bugs réels ont été trouvés en écrivant ces tests : `int(n × 0.15)` vidait
+> la validation sur les petites catégories, et les fichiers sources du corpus
+> contenaient des accents résiduels contredisant la convention.
+
+```bash
+pytest -m "not slow"      # suite rapide (CI)
+pytest -m slow            # tokenizer requis, en local
+ruff check .
+pre-commit install        # hooks avant commit
+```
+
+---
+
 ## 📁 Structure du projet
 
 ```
 finetuning/
-├── src/
-│   └── config.py            # Configuration centrale (dataclasses)
+├── src/                     # Logique reutilisable
+│   ├── config.py            # Configuration centrale (dataclasses)
+│   ├── metrics.py           # ⭐ Metriques + bootstrap (SANS torch -> testable en CI)
+│   ├── retrieval.py         # ⭐ Retrieveur TF-IDF (SANS torch)
+│   └── logging_utils.py     # ⭐ Logging structure + empreinte de run
+├── tests/                   # ⭐ 42 tests, 98 % de couverture sur src/
+│   ├── test_split.py        #    garde-fou anti-fuite (non-regression Tier 0)
+│   ├── test_metrics.py      #    metriques, IC, normalisation des accents
+│   ├── test_corpus.py       #    integrite du corpus reel
+│   ├── test_retrieval.py    #    deduplication par group_id
+│   ├── test_config.py       #    coherence de la configuration
+│   └── test_masking.py      #    masquage du prompt (marque `slow`)
+├── .github/workflows/ci.yml # ⭐ CI : ruff + pytest + pipeline de donnees
 ├── scripts/
 │   ├── generate_dataset.py  # Assemble le corpus + attribue les group_id
 │   ├── sweep.py             # ⭐ Recherche d'hyperparamètres (lr × rang LoRA)
@@ -428,8 +490,12 @@ finetuning/
 ├── merge_model.py           # Fusion adaptateur LoRA → modèle autonome
 ├── api_server.py            # Serveur d'inférence FastAPI
 ├── Modelfile                # Déploiement Ollama (GGUF)
+├── Dockerfile               # ⭐ Image d'inference (multi-etapes, sans poids)
+├── pyproject.toml           # ⭐ Paquet + config ruff & pytest
+├── .pre-commit-config.yaml  # ⭐ Hooks avant commit
 ├── setup.ps1                # Installation environnement (Windows)
-├── requirements.txt
+├── requirements.txt         # Dependances directes
+├── requirements.lock.txt    # ⭐ Versions figees (reproductibilite)
 └── README.md
 ```
 
@@ -586,11 +652,14 @@ ollama create qwen-pyds -f Modelfile
 - [ ] Étendre le corpus à 500+ concepts
 
 **Ingénierie**
-- [ ] Suite **pytest** + **GitHub Actions**, dont un test qui échoue si la fuite
-      de données réapparaît
-- [ ] Dépendances figées (lockfile), `pyproject.toml`, ruff + pre-commit
-- [ ] Logging structuré (commit git + seed journalisés par run)
-- [ ] Dockerfile
+- [x] Suite **pytest** (42 tests) + **GitHub Actions**, dont le test qui échoue
+      si la fuite de données réapparaît
+- [x] Dépendances figées (`requirements.lock.txt`), `pyproject.toml`, ruff,
+      pre-commit
+- [x] Logging structuré (commit git, graine et versions journalisés par run)
+- [x] Dockerfile multi-étapes (sans poids embarqués)
+- [ ] Publier l'image sur un registre + CI de build Docker
+- [ ] Tests d'intégration GPU sur un runner dédié (aujourd'hui marqués `slow`)
 
 **Serving**
 - [ ] Corriger le blocage de la boucle d'événements dans `api_server.py`

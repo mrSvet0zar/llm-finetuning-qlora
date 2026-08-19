@@ -70,13 +70,13 @@ def generate_from_messages(model, tokenizer, messages: list[dict],
     input_ids = enc["input_ids"].to(model.device)
     attention_mask = enc["attention_mask"].to(model.device)
 
-    gen_kwargs = dict(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        max_new_tokens=max_new_tokens,
-        repetition_penalty=1.1,
-        pad_token_id=tokenizer.pad_token_id,
-    )
+    gen_kwargs = {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "max_new_tokens": max_new_tokens,
+        "repetition_penalty": 1.1,
+        "pad_token_id": tokenizer.pad_token_id,
+    }
     if temperature > 0:
         # Echantillonnage : on ne passe temperature/top_p qu'en mode sampling
         # (sinon transformers 5.x emet un warning "flags ignored").

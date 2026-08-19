@@ -49,7 +49,7 @@
   },
   {
     "instruction": "Qu'est-ce qu'un test de regression pour un modele de langage ?",
-    "output": "C'est un ensemble de cas figes, avec leurs sorties attendues ou des proprietes verifiables, que l'on rejoue systematiquement a chaque nouvelle version du modele ou du prompt. Le but n'est pas de mesurer une performance globale mais de detecter les regressions : un comportement qui fonctionnait et qui casse. On y met les cas critiques du metier, les bugs deja corrigés pour eviter leur reapparition, les formats de sortie a respecter et les refus attendus sur des demandes hors perimetre. Comme la sortie d'un LLM n'est pas deterministe, on teste des proprietes plutot que l'egalite exacte : presence de champs obligatoires, validite du JSON, absence de termes interdits, seuil de similarite semantique avec une reponse de reference."
+    "output": "C'est un ensemble de cas figes, avec leurs sorties attendues ou des proprietes verifiables, que l'on rejoue systematiquement a chaque nouvelle version du modele ou du prompt. Le but n'est pas de mesurer une performance globale mais de detecter les regressions : un comportement qui fonctionnait et qui casse. On y met les cas critiques du metier, les bugs deja corriges pour eviter leur reapparition, les formats de sortie a respecter et les refus attendus sur des demandes hors perimetre. Comme la sortie d'un LLM n'est pas deterministe, on teste des proprietes plutot que l'egalite exacte : presence de champs obligatoires, validite du JSON, absence de termes interdits, seuil de similarite semantique avec une reponse de reference."
   },
   {
     "instruction": "Pourquoi la taille du jeu de test influence-t-elle la fiabilite des conclusions ?",

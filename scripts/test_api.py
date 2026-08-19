@@ -1,9 +1,11 @@
 """Test de fumee de l'API FastAPI (via TestClient : exerce lifespan + endpoints)."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from starlette.testclient import TestClient
+
 from api_server import app
 
 with TestClient(app) as client:      # le 'with' declenche le startup (chargement modele)

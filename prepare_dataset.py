@@ -33,7 +33,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.config import Config  # noqa: E402
 
-
 # --------------------------------------------------------------------------
 #  Reformulations appliquees AU TRAIN UNIQUEMENT
 # --------------------------------------------------------------------------
@@ -60,7 +59,7 @@ def _normalize(text: str) -> str:
 #  1. Validation
 # --------------------------------------------------------------------------
 def load_raw_data(source_file: str) -> list[dict]:
-    with open(source_file, "r", encoding="utf-8") as f:
+    with open(source_file, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -107,6 +106,26 @@ def validate_and_dedup(data: list[dict], cfg: Config) -> list[dict]:
 # --------------------------------------------------------------------------
 #  2. Split PAR GROUPE
 # --------------------------------------------------------------------------
+def _split_sizes(n: int, cfg: Config) -> tuple[int, int]:
+    """Tailles (train, val) pour n concepts d'une meme categorie.
+
+    La troncature de `int(n * ratio)` vide la validation sur les petites
+    categories : avec n=4 et un ratio de 0.15, `int(0.6)` vaut 0. On garantit
+    donc au moins un concept en validation ET en test des que la categorie en
+    compte au moins trois.
+    """
+    if n <= 1:
+        return n, 0                       # tout au train
+    if n == 2:
+        return 1, 0                       # 1 train, 1 test
+
+    n_val = max(1, int(n * cfg.data.val_ratio))
+    n_train = int(n * cfg.data.train_ratio)
+    # Laisse au minimum un concept au test
+    n_train = min(n_train, n - n_val - 1)
+    return max(n_train, 1), n_val
+
+
 def group_aware_split(data: list[dict], cfg: Config) -> tuple[list, list, list]:
     """Decoupe en train/val/test sans jamais scinder un groupe, ET en
     stratifiant par categorie.
@@ -134,9 +153,7 @@ def group_aware_split(data: list[dict], cfg: Config) -> tuple[list, list, list]:
     for category in sorted(by_category):        # tri = determinisme
         gids = sorted(by_category[category])
         rng.shuffle(gids)
-        n = len(gids)
-        n_train = int(n * cfg.data.train_ratio)
-        n_val = int(n * cfg.data.val_ratio)
+        n_train, n_val = _split_sizes(len(gids), cfg)
         split_ids["train"] += gids[:n_train]
         split_ids["val"] += gids[n_train:n_train + n_val]
         split_ids["test"] += gids[n_train + n_val:]

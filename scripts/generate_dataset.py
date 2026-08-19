@@ -39,7 +39,7 @@ def normalize_text(text: str) -> str:
 def load_category(path: Path) -> list[dict]:
     """Charge un fichier de categorie et attribue les group_id."""
     category = path.stem.replace("_", "-")
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         entries = json.load(f)
 
     items = []

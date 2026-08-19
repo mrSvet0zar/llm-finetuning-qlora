@@ -26,20 +26,20 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
-    Trainer,
     EarlyStoppingCallback,
+    Trainer,
+    TrainingArguments,
     set_seed,
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.config import Config  # noqa: E402
-
+from src.logging_utils import log_run_context, run_context, setup_logging  # noqa: E402
 
 SYSTEM_PROMPT = (
     "Tu es un assistant expert en Python, data science et machine learning. "
@@ -221,20 +221,33 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     cfg = build_config(parse_args())
     set_seed(cfg.train.seed)
-    print(f"Config : lr={cfg.train.learning_rate} | r={cfg.lora.r} "
-          f"| alpha={cfg.lora.alpha} | epochs={cfg.train.num_train_epochs} "
-          f"| seed={cfg.train.seed}")
+
+    out_dir = Path(cfg.train.output_dir)
+    logger = setup_logging(out_dir / "logs")
+
+    # Empreinte du run (commit git, graine, versions, GPU) : sans elle, un
+    # resultat n'est pas rejouable. Ecrite aussi en JSONL a cote des poids.
+    ctx = run_context({
+        "learning_rate": cfg.train.learning_rate,
+        "lora_r": cfg.lora.r,
+        "lora_alpha": cfg.lora.alpha,
+        "num_train_epochs": cfg.train.num_train_epochs,
+        "seed": cfg.train.seed,
+        "run_name": cfg.train.run_name,
+    })
+    log_run_context(logger, ctx)
+    logger.info(f"Config : lr={cfg.train.learning_rate} | r={cfg.lora.r} "
+                f"| alpha={cfg.lora.alpha} | epochs={cfg.train.num_train_epochs} "
+                f"| seed={cfg.train.seed}")
 
     if not torch.cuda.is_available():
-        print("ATTENTION : aucun GPU CUDA detecte. QLoRA requiert un GPU NVIDIA.")
+        logger.warning("Aucun GPU CUDA detecte. QLoRA requiert un GPU NVIDIA.")
 
     model, tokenizer = load_model_and_tokenizer(cfg)
     model = setup_lora(model, cfg)
 
     train_ds, eval_ds = prepare_datasets(cfg, tokenizer)
-    print(f"\nDataset : {len(train_ds)} train / {len(eval_ds)} val")
-
-    out_dir = Path(cfg.train.output_dir)
+    logger.info(f"Dataset : {len(train_ds)} train / {len(eval_ds)} val")
     training_args = TrainingArguments(
         output_dir=str(out_dir),
         num_train_epochs=cfg.train.num_train_epochs,
@@ -289,6 +302,7 @@ def main() -> None:
     metrics.update(eval_metrics)
     # Hyperparametres joints aux resultats : sans cela, un dossier de run est
     # inexploitable a posteriori.
+    metrics["run_context"] = ctx
     metrics["hparams"] = {
         "learning_rate": cfg.train.learning_rate,
         "lora_r": cfg.lora.r,

@@ -57,7 +57,7 @@
   },
   {
     "instruction": "Quand utiliser une dataclass plutot qu'un dictionnaire ou une classe classique ?",
-    "output": "Une dataclass est adaptee quand on veut un conteneur de donnees structure et typé sans ecrire de boilerplate : le decorateur `@dataclass` genere `__init__`, `__repr__` et `__eq__` automatiquement. Comparee a un dictionnaire, elle apporte des champs explicites, l'autocompletion, la verification statique des types et empeche les fautes de frappe sur les cles. Comparee a une classe classique, elle evite une dizaine de lignes repetitives. On peut la rendre immuable avec `@dataclass(frozen=True)`, ce qui la rend hashable. On garde le dictionnaire pour des donnees vraiment dynamiques (cles inconnues a l'avance) et on passe a Pydantic quand il faut valider des donnees externes a l'execution."
+    "output": "Une dataclass est adaptee quand on veut un conteneur de donnees structure et type sans ecrire de boilerplate : le decorateur `@dataclass` genere `__init__`, `__repr__` et `__eq__` automatiquement. Comparee a un dictionnaire, elle apporte des champs explicites, l'autocompletion, la verification statique des types et empeche les fautes de frappe sur les cles. Comparee a une classe classique, elle evite une dizaine de lignes repetitives. On peut la rendre immuable avec `@dataclass(frozen=True)`, ce qui la rend hashable. On garde le dictionnaire pour des donnees vraiment dynamiques (cles inconnues a l'avance) et on passe a Pydantic quand il faut valider des donnees externes a l'execution."
   },
   {
     "instruction": "Pourquoi utiliser le module `logging` plutot que `print` ?",

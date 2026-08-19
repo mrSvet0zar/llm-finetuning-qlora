@@ -1,11 +1,13 @@
 """Smoke test rapide : valide le chat template + masquage sans charger le modele."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from transformers import AutoTokenizer
+
 from src.config import Config
-from train import build_tokenize_fn, SYSTEM_PROMPT, CausalCollator
+from train import CausalCollator, build_tokenize_fn
 
 cfg = Config()
 tok = AutoTokenizer.from_pretrained(cfg.model.model_name, trust_remote_code=True)
@@ -20,7 +22,7 @@ example = {
 }
 out = fn(example)
 n = len(out["input_ids"])
-n_masked = sum(1 for l in out["labels"] if l == -100)
+n_masked = sum(1 for lab in out["labels"] if lab == -100)
 n_train = n - n_masked
 
 print(f"Tokens totaux        : {n}")
@@ -30,7 +32,7 @@ assert n_train > 0, "Aucun token de reponse — masquage casse !"
 assert n_masked > 0, "Aucun token masque — le prompt n'est pas masque !"
 
 # Verifie que les tokens de reponse decodent bien la reponse
-resp_ids = [t for t, l in zip(out["input_ids"], out["labels"]) if l != -100]
+resp_ids = [t for t, lab in zip(out["input_ids"], out["labels"], strict=True) if lab != -100]
 decoded = tok.decode(resp_ids, skip_special_tokens=True)
 print(f"\nReponse reconstruite depuis les labels :\n  {decoded!r}")
 

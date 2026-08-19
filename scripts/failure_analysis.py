@@ -24,13 +24,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from rouge_score import rouge_scorer                    # noqa: E402
-from src.config import Config                           # noqa: E402
+from rouge_score import rouge_scorer  # noqa: E402
+
+from src.config import Config  # noqa: E402
 
 
 def load_test_categories(cfg: Config) -> list[str]:
     path = Path(cfg.data.processed_dir) / "test.jsonl"
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return [json.loads(line)["category"] for line in f]
 
 
@@ -81,7 +82,7 @@ def main() -> None:
 
     scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
     rows = []
-    for i, (q, ref, pred) in enumerate(zip(questions, refs, preds)):
+    for i, (q, ref, pred) in enumerate(zip(questions, refs, preds, strict=True)):
         rows.append({
             "i": i,
             "category": categories[i] if i < len(categories) else "?",

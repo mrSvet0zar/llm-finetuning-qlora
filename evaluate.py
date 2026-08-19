@@ -19,97 +19,26 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
-import unicodedata
 from pathlib import Path
 
 import torch
-from rouge_score import rouge_scorer
-import sacrebleu
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from src.config import Config  # noqa: E402
-from inference import load_model, generate  # noqa: E402
 from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: E402
-from train import SYSTEM_PROMPT  # noqa: E402
+
+from inference import generate, load_model  # noqa: E402
+from src.config import Config  # noqa: E402
+from src.metrics import compute_metrics  # noqa: E402
 
 
 def load_test(cfg: Config) -> list[dict]:
     path = Path(cfg.data.processed_dir) / "test.jsonl"
     data = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             data.append(json.loads(line))
     return data
-
-
-def strip_accents(text: str) -> str:
-    """Retire les diacritiques (metriques == metriques)."""
-    decomposed = unicodedata.normalize("NFD", text)
-    return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
-
-
-def _per_example_rouge(predictions: list[str], references: list[str]) -> list[dict]:
-    """Scores ROUGE par exemple (necessaires pour le bootstrap)."""
-    scorer = rouge_scorer.RougeScorer(
-        ["rouge1", "rouge2", "rougeL"], use_stemmer=True,
-    )
-    out = []
-    for pred, ref in zip(predictions, references):
-        s = scorer.score(ref, pred)
-        out.append({k: s[k].fmeasure for k in ("rouge1", "rouge2", "rougeL")})
-    return out
-
-
-def compute_metrics(predictions: list[str], references: list[str],
-                    n_bootstrap: int = 1000, seed: int = 42,
-                    normalize_accents: bool = True) -> dict:
-    """Metriques ponctuelles + intervalles de confiance a 95 % par bootstrap.
-
-    Sur un jeu de test de quelques dizaines d'exemples, un score isole n'est
-    qu'une estimation bruitee. On reechantillonne le jeu avec remise pour
-    estimer la dispersion : si les intervalles de deux modeles se recouvrent
-    largement, la difference observee n'est pas etablie.
-
-    `normalize_accents` (actif par defaut) retire les diacritiques des DEUX
-    cotes avant comparaison. Sans cela, la mesure est biaisee : le corpus de
-    reference de ce projet est ecrit sans accents, le modele fine-tune a donc
-    appris a ne pas en mettre, tandis que le modele de base ecrit un francais
-    correctement accentue. ROUGE comparant des tokens exacts, `metriques` et
-    `metriques` accentue comptent comme differents : la baseline etait penalisee
-    pour une raison purement orthographique, ce qui gonflait le gain d'environ
-    +0.044 de ROUGE-1. La normalisation neutralise cet artefact.
-    """
-    if normalize_accents:
-        predictions = [strip_accents(p) for p in predictions]
-        references = [strip_accents(r) for r in references]
-
-    n = len(predictions)
-    per_ex = _per_example_rouge(predictions, references)
-
-    point = {k: sum(e[k] for e in per_ex) / max(n, 1)
-             for k in ("rouge1", "rouge2", "rougeL")}
-    point["bleu"] = sacrebleu.corpus_bleu(predictions, [references]).score
-
-    # --- Bootstrap ---
-    rng = random.Random(seed)
-    samples = {k: [] for k in ("rouge1", "rouge2", "rougeL", "bleu")}
-    for _ in range(n_bootstrap):
-        idx = [rng.randrange(n) for _ in range(n)]
-        for k in ("rouge1", "rouge2", "rougeL"):
-            samples[k].append(sum(per_ex[i][k] for i in idx) / n)
-        samples["bleu"].append(sacrebleu.corpus_bleu(
-            [predictions[i] for i in idx], [[references[i] for i in idx]]).score)
-
-    ci = {}
-    for k, vals in samples.items():
-        vals.sort()
-        lo = vals[int(0.025 * n_bootstrap)]
-        hi = vals[int(0.975 * n_bootstrap) - 1]
-        ci[k] = [lo, hi]
-
-    return {**point, "ci95": ci, "n_samples": n}
 
 
 def load_baseline(cfg: Config):

@@ -1,0 +1,40 @@
+# Hooks executes avant chaque commit.
+#
+#   pip install pre-commit
+#   pre-commit install
+#
+# Objectif : attraper localement ce que la CI attraperait de toute facon,
+# mais en quelques secondes plutot qu'apres un aller-retour.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=2000"]   # empeche de commiter des poids par megarde
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+        # Formatage non applique pour l'instant : le style manuel actuel est
+        # coherent. Decommenter le jour ou l'on adopte ruff-format.
+        stages: [manual]
+
+  - repo: local
+    hooks:
+      # Le garde-fou du projet : la suite de tests rapide, sans GPU.
+      - id: pytest-rapide
+        name: pytest (sans les tests lents)
+        entry: python -m pytest -m "not slow" -q
+        language: system
+        pass_filenames: false
+        always_run: true

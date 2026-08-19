@@ -39,7 +39,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import Config          # noqa: E402
+from src.config import Config  # noqa: E402
 
 # Cles a ignorer dans le fichier de predictions (ce ne sont pas des modeles)
 NON_MODEL_KEYS = {"questions", "references"}
@@ -116,6 +116,7 @@ def judge_via_api(items: list[dict]) -> list[dict] | None:
 def judge_via_local(items: list[dict]) -> list[dict]:
     """Repli : juge avec le modele de base local (faible, biaise)."""
     import torch  # noqa: F401
+
     from evaluate import load_baseline
     from inference import generate_from_messages
 
@@ -199,7 +200,7 @@ def main() -> None:
         if args.judge:
             print("  Juge LLM ...")
             items = [{"question": q, "reference": r, "prediction": pr}
-                     for q, r, pr in zip(questions, refs, preds)]
+                     for q, r, pr in zip(questions, refs, preds, strict=True)]
             scores = judge_via_api(items)
             backend = "api"
             if scores is None:

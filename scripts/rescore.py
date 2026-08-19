@@ -22,8 +22,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import Config                       # noqa: E402
-from evaluate import compute_metrics                # noqa: E402
+from src.config import Config  # noqa: E402
+from src.metrics import compute_metrics  # noqa: E402
 
 NON_MODEL_KEYS = {"questions", "references"}
 

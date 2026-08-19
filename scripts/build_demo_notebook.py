@@ -8,6 +8,7 @@ sorties) est faite separement via nbconvert --execute.
 Usage : python scripts/build_demo_notebook.py
 """
 from pathlib import Path
+
 import nbformat as nbf
 
 ROOT = Path(__file__).resolve().parent.parent
