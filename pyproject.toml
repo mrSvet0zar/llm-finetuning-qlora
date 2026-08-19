@@ -27,6 +27,10 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
+    # Legers et sans torch : permettent de tester en CI la couche de service,
+    # notamment que la generation ne bloque plus la boucle d'evenements.
+    "fastapi>=0.115",
+    "httpx>=0.28",
 ]
 
 [project.urls]

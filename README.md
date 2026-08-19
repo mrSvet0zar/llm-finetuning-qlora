@@ -95,13 +95,13 @@ Durée : **7 min 25 s** sur la RTX 4070 (~7 Go / 8 Go de VRAM).
 | Analyse qualitative des échecs | ✅ erreurs factuelles documentées |
 | Inférence (base 4-bit + adaptateur) | ✅ |
 | Fusion LoRA → modèle autonome | ✅ `merge_model.py` |
-| Serveur API FastAPI (`/generate`) | ✅ testé (latence ~12 s / 120 tok) |
+| Serveur API (streaming, auth, quotas, métriques) | ✅ TTFT **129 ms** (p50) |
 | Export GGUF + Ollama | 📋 documenté (nécessite llama.cpp) |
 | Publication Hugging Face Hub | 📋 documenté (nécessite un token HF) |
 
-> **Note perf** : la latence de `model.generate` non-batché (~12 s) dépasse la
-> cible < 2 s du cahier des charges. En production, on passerait par **vLLM**
-> (batching continu, PagedAttention) ou le modèle fusionné en fp16 — voir pistes.
+> **Note perf** : la réponse complète (~16 s) dépasse la cible < 2 s du cahier
+> des charges, mais le **streaming ramène la latence perçue à 129 ms**. Voir
+> [Service d'inférence](#-service-dinférence).
 
 ---
 
@@ -396,6 +396,80 @@ spécialise le modèle sans toucher à ses poids d'origine.
 
 ---
 
+## 🚀 Service d'inférence
+
+### Le bug corrigé : la boucle d'événements bloquée
+
+La première version déclarait `async def generate_endpoint(...)` puis appelait
+une fonction de génération **synchrone de ~16 s**. Une coroutine qui effectue un
+travail bloquant **monopolise la boucle d'événements** : pendant une génération,
+le serveur ne répondait plus à rien — **pas même `/health`**. Derrière un
+orchestrateur, cela fait redémarrer un conteneur pourtant parfaitement sain.
+
+Le travail bloquant part désormais dans un threadpool (`run_in_threadpool`).
+Mesure du retard subi par la boucle pendant une génération :
+
+| Version | Retard de la boucle |
+|---|---|
+| Code bugué (appel direct) | **955 ms** ⛔ |
+| Code corrigé (threadpool) | **17 ms** ✅ |
+
+`tests/test_api_concurrency.py` verrouille la correction. La première version du
+test **ne détectait pas le bug** — elle mesurait la latence de `/health` *après*
+la génération, or le blocage se produisait avant. Mesurer le retard de la boucle
+elle-même discrimine, et cela a été **vérifié contre le bug réel** avant de
+valider le test.
+
+### Streaming : la latence perçue divisée par 127
+
+Mesures réelles sur RTX 4070 (`scripts/load_test.py`, 160 tokens max) :
+
+| Métrique | p50 | p95 |
+|---|---|---|
+| Réponse complète | 16 346 ms | 18 082 ms |
+| **Time-to-first-token** (SSE) | **129 ms** | 266 ms |
+| Débit | 8,9 tokens/s | — |
+
+> La cible « **< 2 s** » du cahier des charges est **hors d'atteinte pour la
+> réponse complète** sur ce matériel — 16 s, et aucun réglage n'y changera
+> grand-chose. En revanche elle est **largement tenue pour la latence perçue** :
+> le premier token arrive en **129 ms**. C'est ce que voit l'utilisateur.
+
+### Ce que le serveur fait désormais
+
+| Aspect | Implémentation |
+|---|---|
+| **Concurrence** | threadpool + sémaphore bornant l'accès GPU (`MAX_CONCURRENCY`) |
+| **Streaming** | SSE via `TextIteratorStreamer` (`POST /generate/stream`) |
+| **Auth** | clé API par en-tête `X-API-Key` (si `API_KEY` définie) |
+| **Quotas** | seau à jetons par client — tolère les rafales, borne le débit moyen |
+| **Observabilité** | `/metrics` (p50/p95/p99, tokens/s, taux d'erreur) + `/metrics/prometheus` |
+| **Santé** | `/health` (liveness) **distinct** de `/ready` (readiness, 503 tant que le modèle charge) |
+| **Robustesse** | bornes sur le prompt et les tokens, timeout, `request_id` journalisé |
+
+```bash
+uvicorn api_server:app --host 0.0.0.0 --port 8000
+python scripts/load_test.py -n 10 -c 2 --stream    # p50/p95/p99 + TTFT
+```
+
+### ⚠️ vLLM : documenté, non mesuré
+
+vLLM (batching continu, PagedAttention) est **la** réponse au débit — mais il ne
+supporte pas Windows nativement, seulement Linux ou WSL2. Il n'a donc **pas été
+exécuté ni mesuré ici**, et aucun chiffre le concernant n'est avancé. Sur une
+machine Linux :
+
+```bash
+pip install vllm
+python -m vllm.entrypoints.openai.api_server \
+  --model outputs/merged-model --max-model-len 1024 --gpu-memory-utilization 0.85
+```
+
+Le modèle fusionné (`merge_model.py`) est un checkpoint standard, donc
+directement compatible.
+
+---
+
 ## 🧪 Qualité logicielle
 
 [![CI](https://github.com/mrSvet0zar/llm-finetuning-qlora/actions/workflows/ci.yml/badge.svg)](https://github.com/mrSvet0zar/llm-finetuning-qlora/actions/workflows/ci.yml)
@@ -458,6 +532,7 @@ finetuning/
 │   ├── config.py            # Configuration centrale (dataclasses)
 │   ├── metrics.py           # ⭐ Metriques + bootstrap (SANS torch -> testable en CI)
 │   ├── retrieval.py         # ⭐ Retrieveur TF-IDF (SANS torch)
+│   ├── serving.py           # ⭐ Metriques + rate limiting (SANS torch)
 │   └── logging_utils.py     # ⭐ Logging structure + empreinte de run
 ├── tests/                   # ⭐ 42 tests, 98 % de couverture sur src/
 │   ├── test_split.py        #    garde-fou anti-fuite (non-regression Tier 0)
@@ -465,6 +540,8 @@ finetuning/
 │   ├── test_corpus.py       #    integrite du corpus reel
 │   ├── test_retrieval.py    #    deduplication par group_id
 │   ├── test_config.py       #    coherence de la configuration
+│   ├── test_serving.py      #    percentiles, seau a jetons
+│   ├── test_api_concurrency.py #  boucle d'evenements non bloquee
 │   └── test_masking.py      #    masquage du prompt (marque `slow`)
 ├── .github/workflows/ci.yml # ⭐ CI : ruff + pytest + pipeline de donnees
 ├── scripts/
@@ -662,9 +739,15 @@ ollama create qwen-pyds -f Modelfile
 - [ ] Tests d'intégration GPU sur un runner dédié (aujourd'hui marqués `slow`)
 
 **Serving**
-- [ ] Corriger le blocage de la boucle d'événements dans `api_server.py`
-      (endpoint `async` appelant une génération synchrone)
-- [ ] **vLLM** + streaming SSE, authentification, rate limiting, `/metrics`
+- [x] Corriger le blocage de la boucle d'événements (955 ms → 17 ms de retard),
+      avec test de non-régression validé contre le bug réel
+- [x] **Streaming SSE** — TTFT p50 **129 ms** (vs 16 s pour la réponse complète)
+- [x] Authentification par clé API, rate limiting (seau à jetons), `/metrics`,
+      `/ready` distinct de `/health`, bornes et timeouts
+- [x] Test de charge avec percentiles (`scripts/load_test.py`)
+- [ ] **vLLM** — documenté mais **non mesuré** : pas de support Windows natif,
+      nécessite Linux ou WSL2
+- [ ] Publier l'image Docker sur un registre
 - [ ] Publier l'adaptateur sur le Hugging Face Hub + **model card**
 
 ---
