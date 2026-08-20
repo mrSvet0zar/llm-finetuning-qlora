@@ -62,11 +62,16 @@ Sur **3 graines**, le fine-tuné donne ROUGE-1 **0.3632 ± 0.0043** et BLEU
 > l'**entraînement**. Les deux sont nécessaires — l'un ne remplace pas l'autre.
 
 > 🎯 **Conclusion honnête** : le fine-tuning apporte un gain **réel mais modeste,
-> et concentré sur la forme**. Il n'améliore pas l'exactitude factuelle, limitée
-> par le modèle de base de 3 Md. Ni le few-shot ni le RAG ne font mieux. Pour un
-> usage exigeant la justesse du contenu, le levier ne serait pas « plus de
-> fine-tuning » mais **un modèle de base plus fort** ou **du RAG sur une vraie
-> base documentaire**.
+> et concentré sur la forme**. Il n'améliore pas l'exactitude factuelle. Ni le
+> few-shot ni le RAG sur le corpus d'entraînement ne font mieux.
+>
+> Cette limite a ensuite été **testée** en refaisant tout le protocole avec un
+> modèle **2,3× plus gros** — voir
+> [3B contre 7B](#-3b-contre-7b--lhypothèse-mise-à-lépreuve). Résultat : le 7B
+> est meilleur, mais **hallucine toujours**, et le gain du fine-tuning y
+> *rétrécit* (+38 % → +17 %). **Aucun des deux leviers ne résout la factualité
+> à cette échelle** ; ce qui la résoudrait est du **RAG sur une vraie base
+> documentaire**.
 
 **Courbe d'apprentissage** (loss de validation) :
 
@@ -93,6 +98,7 @@ Durée : **7 min 25 s** sur la RTX 4070 (~7 Go / 8 Go de VRAM).
 | Baselines few-shot / RAG | ✅ aucune ne bat le fine-tuning |
 | Évaluation sémantique (BERTScore) | ✅ gain modeste (+6,8 %) |
 | Analyse qualitative des échecs | ✅ erreurs factuelles documentées |
+| **Comparaison 3B vs 7B** | ✅ hypothèse testée, **partiellement infirmée** |
 | Inférence (base 4-bit + adaptateur) | ✅ |
 | Fusion LoRA → modèle autonome | ✅ `merge_model.py` |
 | Serveur API (streaming, auth, quotas, métriques) | ✅ TTFT **129 ms** (p50) |
@@ -395,6 +401,101 @@ Résultat : un adaptateur de quelques dizaines de Mo, entraîné en local, qui
 spécialise le modèle sans toucher à ses poids d'origine.
 
 ---
+
+## 🔭 3B contre 7B : l'hypothèse mise à l'épreuve
+
+Le projet affirmait que *« la limite vient du modèle de base »*. Plutôt que de
+le supposer, on l'a **testé** : même corpus, même découpage, mêmes
+hyperparamètres, même jeu de test. **Une seule variable change.**
+
+| Système | ROUGE-1 | ROUGE-L | BLEU | BERTScore |
+|---|---|---|---|---|
+| 3B base | 0.260 `[0.245–0.276]` | 0.127 | 1.92 | 0.6569 |
+| 3B fine-tuné | 0.359 `[0.341–0.376]` | 0.166 | 4.46 | 0.7018 |
+| 7B base | 0.330 `[0.307–0.350]` | 0.157 | 3.36 | **0.6572** |
+| **7B fine-tuné** | **0.385** `[0.365–0.402]` | **0.180** | **6.24** | **0.7119** |
+
+*(Qwen2.5-7B-Instruct, QLoRA 4-bit, 15 min 25 s sur la RTX 4070 — 5,9 Go de
+VRAM, 2 Go de marge.)*
+
+### Ce que les chiffres disent vraiment
+
+**1. Le gain du fine-tuning RÉTRÉCIT quand le modèle de base grandit.**
+
+| | ROUGE-1 | ROUGE-L | BLEU |
+|---|---|---|---|
+| Gain sur le **3B** | +38 % ✅ établi | +31 % ✅ établi | +132 % ✅ établi |
+| Gain sur le **7B** | +17 % ✅ établi | +14 % ⚠️ non établi | +86 % ⚠️ non établi |
+
+Sur le 7B, deux des trois gains ne sont **plus statistiquement établis** : les
+intervalles de confiance se recouvrent. Plus le modèle de base est bon, moins
+le fine-tuning apporte — rendements décroissants.
+
+**2. Fine-tuner un petit modèle ≈ utiliser un modèle deux fois plus gros.**
+
+Le 3B fine-tuné (0.359) fait aussi bien que le 7B brut (0.330) — les
+intervalles se touchent. Concrètement : **7 minutes d'entraînement sur un 3B
+valent 4 Go de VRAM supplémentaires** en permanence. C'est un arbitrage
+d'ingénierie réel.
+
+**3. Le score sémantique ne bouge quasiment pas.**
+
+Le 7B base obtient **0.6572** de BERTScore, le 3B base **0.6569** — un écart
+nul. Pourtant leur ROUGE-1 diffère de 27 %. Traduction : **le 7B écrit
+davantage dans le style de la référence sans être plus proche du sens.**
+
+### 🔴 Une correction à mon propre diagnostic
+
+J'avais écrit que « le levier serait un modèle de base plus fort ». **Les
+données ne le confirment qu'à moitié.**
+
+| Levier | Gain ROUGE-1 |
+|---|---|
+| Fine-tuner le 3B | **+0.099** |
+| Passer du 3B au 7B (sans fine-tuning) | +0.070 |
+
+Sur ces métriques, **le fine-tuning pèse plus que le changement de modèle** —
+l'inverse de ce que j'annonçais. Avec une réserve importante : ces métriques
+récompensent surtout la forme, et la forme est précisément ce que le
+fine-tuning enseigne. La comparaison est donc partiellement circulaire.
+
+### Et l'exactitude factuelle ?
+
+Le test décisif, sur la question « Qu'est-ce que le score ROUGE ? » :
+
+| | Réponse produite |
+|---|---|
+| Référence | ROUGE-1 = n-grammes, ROUGE-L = plus longue sous-séquence commune |
+| **3B fine-tuné** | « ROUGE-**L** = tokens exacts, ROUGE-**1** = phrases identiques » ❌ **inversé** |
+| **7B fine-tuné** | « rouge-1 = n-grammes uniques, rouge-2 = bigrammes, rouge-L = longueurs communes » ✅ **correct** |
+
+Mais sur BERTScore, le 7B invente à son tour (« modèle de classification
+fine-tuné » — faux).
+
+> **Verdict honnête : le modèle plus gros améliore l'exactitude sans la régler.**
+> Doubler la taille du modèle corrige certaines erreurs et en introduit
+> d'autres. Aucun des deux leviers — plus de fine-tuning, ou un modèle plus
+> gros — ne résout la factualité à cette échelle. Ce qui la résoudrait :
+> **du RAG sur une vraie base documentaire**, où le modèle lit la réponse au
+> lieu de la reconstituer de mémoire.
+
+### Deux bugs révélés par le passage à l'échelle
+
+Aucun des deux n'était nouveau — le 3B avait simplement assez de marge pour
+les masquer :
+
+| Symptôme | Cause | Correctif |
+|---|---|---|
+| `STATUS_IN_PAGE_ERROR` à l'entraînement | `paged_adamw_8bit` s'appuie sur la mémoire unifiée CUDA, instable sous Windows (WDDM) | optimiseur non paginé `adamw_8bit` |
+| Échec de chargement de la baseline | `del` supprime le *nom*, pas l'objet : le wrapper PEFT crée des références circulaires | `gc.collect()` avant `empty_cache()` |
+
+Le second était présent depuis le début. Il ne se manifestait pas parce que
+deux modèles de 3B tenaient dans 8 Go — deux 7B, non.
+
+```bash
+python scripts/compare_models.py    # regenere ce tableau
+```
+
 
 ## 📋 Gouvernance & publication
 
@@ -773,8 +874,8 @@ ollama create qwen-pyds -f Modelfile
       biaisé par auto-préférence. Nécessite une clé API
 - [ ] Sweep **avec plusieurs graines par configuration** (6 × 3 = 18 runs), seule
       façon de conclure sur les hyperparamètres
-- [ ] Comparer à un **modèle de base plus fort** (7B+) — c'est le levier que
-      l'analyse d'échecs désigne pour l'exactitude factuelle
+- [x] Comparer à un **modèle de base plus fort** (Qwen2.5-7B) — fait ; le 7B
+      améliore sans régler l'exactitude, et le gain du fine-tuning y rétrécit
 - [ ] RAG sur une **vraie base documentaire** (et non le seul corpus d'entraînement)
 - [ ] Étendre le corpus à 500+ concepts
 

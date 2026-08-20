@@ -187,10 +187,16 @@ def prepare_datasets(cfg: Config, tokenizer):
 def build_config(args: argparse.Namespace) -> Config:
     """Config par defaut + overrides CLI (necessaires pour le sweep/multi-seed)."""
     cfg = Config()
+    if args.model:
+        cfg.model.model_name = args.model
     if args.lr is not None:
         cfg.train.learning_rate = args.lr
     if args.epochs is not None:
         cfg.train.num_train_epochs = args.epochs
+    if args.optim:
+        cfg.train.optim = args.optim
+    if args.max_seq_len is not None:
+        cfg.model.max_seq_length = args.max_seq_len
     if args.seed is not None:
         cfg.train.seed = args.seed
     if args.lora_r is not None:
@@ -208,10 +214,15 @@ def build_config(args: argparse.Namespace) -> Config:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Fine-tuning QLoRA (overrides CLI)")
+    p.add_argument("--model", type=str, default=None,
+                   help="modele de base (defaut : celui de la config)")
     p.add_argument("--lr", type=float, default=None, help="learning rate")
     p.add_argument("--lora-r", type=int, default=None, help="rang LoRA")
     p.add_argument("--lora-alpha", type=int, default=None, help="alpha LoRA (defaut 2r)")
     p.add_argument("--epochs", type=int, default=None)
+    p.add_argument("--optim", type=str, default=None,
+                   help="optimiseur (ex : adamw_8bit, paged_adamw_8bit)")
+    p.add_argument("--max-seq-len", type=int, default=None)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--output-dir", type=str, default=None)
     p.add_argument("--run-name", type=str, default=None)

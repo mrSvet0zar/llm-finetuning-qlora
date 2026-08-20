@@ -11,14 +11,20 @@ orchestrateur, cela fait redemarrer un conteneur pourtant sain.
 
 Le test
 -------
-On simule une generation lente (sans GPU ni modele) et l'on mesure le RETARD
-subi par la boucle d'evenements pendant ce temps : un `asyncio.sleep(0.05)`
-concurrent doit durer ~0,05 s. S'il dure ~1 s, la boucle est bloquee.
+On simule une generation lente (sans GPU ni modele) et l'on COMPTE les tours de
+boucle d'evenements effectues pendant ce temps. Boucle libre -> des dizaines de
+tours ; boucle bloquee -> quasiment aucun.
 
-Cette mesure a ete validee contre le bug reel : en remplacant
-`run_in_threadpool` par un appel direct (l'ancien code), le retard passe de
-17 ms a 955 ms. Mesurer la latence de /health APRES coup ne suffisait pas — le
-blocage se produisait avant meme que la mesure ne commence.
+Deux versions anterieures de ce test ont ete ecartees :
+  * mesurer la latence de /health APRES la generation : le blocage se produisait
+    avant meme le debut de la mesure, le test passait donc aussi avec le bug ;
+  * mesurer le retard d'un `asyncio.sleep` : discriminant (17 ms contre 955 ms)
+    mais INSTABLE, car un seuil en temps reel echoue quand la machine est
+    chargee. Un test intermittent est pire qu'absent.
+
+Compter les tours de boucle garde le pouvoir discriminant sans dependre d'un
+seuil temporel : meme sur une machine saturee, une boucle libre effectue
+beaucoup de tours, une boucle bloquee n'en fait aucun.
 
 Ces tests n'importent pas torch : `api_server` ne le charge qu'a l'interieur
 des fonctions, jamais au niveau module. Ils tournent donc en CI.
@@ -74,32 +80,37 @@ def _client(app) -> httpx.AsyncClient:
 def test_la_boucle_reste_libre_pendant_une_generation(app_pret):
     """LE test de non-regression.
 
-    On mesure le retard subi par la boucle d'evenements pendant qu'une
-    generation bloquante est en cours. Avec le bug d'origine, ce retard vaut
-    la duree entiere de la generation.
+    On compte les tours de boucle d'evenements effectues pendant qu'une
+    generation bloquante est en cours. Avec le bug d'origine, la boucle est
+    monopolisee et le compteur reste a zero.
     """
-    PAUSE = 0.05
+    TOURS_MINIMUM = 10          # tres en dessous de ce qu'une boucle libre fait
 
     async def scenario():
         async with _client(app_pret) as client:
+            tours = 0
             generation = asyncio.create_task(
                 client.post("/generate", json={"prompt": "question"}))
 
-            t0 = time.perf_counter()
-            await asyncio.sleep(PAUSE)     # doit durer ~PAUSE, pas GENERATION_S
-            retard = time.perf_counter() - t0 - PAUSE
+            # Tant que la generation tourne, la boucle doit continuer a nous
+            # rendre la main.
+            while not generation.done():
+                await asyncio.sleep(0.01)
+                tours += 1
+                if tours > 500:      # garde-fou : ne jamais boucler sans fin
+                    break
 
             sante = await client.get("/health")
-            reponse = await generation
-            return retard, sante, reponse
+            return tours, sante, await generation
 
-    retard, sante, reponse = asyncio.run(scenario())
+    tours, sante, reponse = asyncio.run(scenario())
 
     assert sante.status_code == 200
     assert reponse.status_code == 200
-    assert retard < GENERATION_S / 2, (
-        f"la boucle d'evenements a ete retardee de {retard:.2f} s : la "
-        f"generation la bloque au lieu de partir dans un threadpool")
+    assert tours >= TOURS_MINIMUM, (
+        f"seulement {tours} tours de boucle pendant une generation de "
+        f"{GENERATION_S} s : la boucle est monopolisee au lieu de deleguer "
+        f"le travail bloquant a un threadpool")
 
 
 def test_deux_generations_concurrentes_ne_se_serialisent_pas_deux_fois(app_pret):

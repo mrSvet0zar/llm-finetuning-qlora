@@ -18,6 +18,7 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import sys
 from pathlib import Path
@@ -80,11 +81,15 @@ def main() -> None:
     parser.add_argument("--baseline", action="store_true",
                         help="Evalue aussi le modele de base (comparaison)")
     parser.add_argument("--adapter", type=str, default=None)
+    parser.add_argument("--base-model", type=str, default=None,
+                        help="modele de base pour la comparaison")
     parser.add_argument("--n", type=int, default=None,
                         help="Limiter le nombre d'exemples de test")
     args = parser.parse_args()
 
     cfg = Config()
+    if args.base_model:
+        cfg.model.model_name = args.base_model
     test_data = load_test(cfg)
     if args.n:
         test_data = test_data[:args.n]
@@ -100,8 +105,18 @@ def main() -> None:
 
     # Modele de base (optionnel)
     if args.baseline:
-        del ft_model
+        # Liberation REELLE de la VRAM avant de charger le second modele.
+        # `del` ne supprime qu'un nom : sans `gc.collect()`, l'objet survit
+        # (references circulaires du wrapper PEFT) et la memoire reste prise.
+        # Invisible avec un modele de 3B — la marge suffisait — mais bloquant
+        # avec un 7B : le second chargement echouait sur un offload CPU.
+        del ft_model, ft_tok
+        gc.collect()
         torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            libre = torch.cuda.mem_get_info()[0] / 1e9
+            print("")
+            print(f"VRAM libre apres liberation : {libre:.1f} Go")
         base_model, base_tok = load_baseline(cfg)
         base = evaluate_model(base_model, base_tok, test_data, "base (non fine-tune)")
         results["baseline"], dumps["baseline"] = base["metrics"], base["predictions"]

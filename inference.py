@@ -32,16 +32,33 @@ def load_model(cfg: Config, adapter_path: str | None, merged_path: str | None):
         )
         tokenizer = AutoTokenizer.from_pretrained(merged_path)
     else:
+        import json
+
         from peft import PeftModel
+
+        # L'adaptateur SAIT a quel modele de base il appartient : on lit
+        # `base_model_name_or_path` plutot que de se fier a la config globale.
+        # Sans cela, evaluer un adaptateur 7B avec une config pointant un 3B
+        # produirait une erreur obscure, ou pire, un chargement silencieusement
+        # incoherent.
+        base_name = cfg.model.model_name
+        cfg_file = Path(adapter_path) / "adapter_config.json"
+        if cfg_file.exists():
+            declared = json.loads(cfg_file.read_text(encoding="utf-8")).get(
+                "base_model_name_or_path")
+            if declared and declared != base_name:
+                print(f"  (adaptateur entraine sur {declared} -> utilise ce modele)")
+                base_name = declared
+
         bnb = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type=cfg.model.bnb_4bit_quant_type,
             bnb_4bit_compute_dtype=getattr(torch, cfg.model.bnb_4bit_compute_dtype),
             bnb_4bit_use_double_quant=cfg.model.use_nested_quant,
         )
-        print(f"Chargement base {cfg.model.model_name} + adaptateur {adapter_path}")
+        print(f"Chargement base {base_name} + adaptateur {adapter_path}")
         base = AutoModelForCausalLM.from_pretrained(
-            cfg.model.model_name, quantization_config=bnb, device_map="auto",
+            base_name, quantization_config=bnb, device_map="auto",
             attn_implementation=cfg.model.attn_implementation,
             torch_dtype=getattr(torch, cfg.model.bnb_4bit_compute_dtype),
         )
