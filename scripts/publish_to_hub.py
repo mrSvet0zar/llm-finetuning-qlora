@@ -1,24 +1,23 @@
 """
-Publication de l'adaptateur LoRA et du dataset sur le Hugging Face Hub.
+Publication des adaptateurs LoRA et du corpus sur le Hugging Face Hub.
 
-CE SCRIPT NE CONTIENT AUCUN JETON et n'en demande jamais un en clair. Il
+CE SCRIPT NE CONTIENT AUCUN JETON et n'en reclame jamais un en clair. Il
 s'appuie sur l'authentification deja etablie sur la machine :
 
-    huggingface-cli login          # une fois, interactivement
+    hf auth login              # une fois, interactivement
     # ou bien : export HF_TOKEN=...
 
 Il refuse de publier si aucune authentification n'est trouvee, plutot que de
-reclamer un secret.
+demander un secret.
 
-Par defaut, il fonctionne en MODE SIMULATION : il affiche ce qui serait
-publie, sans rien envoyer. La publication reelle exige `--confirm`, car
-pousser sur le Hub est une action publique et difficilement reversible.
+Par defaut il fonctionne en MODE SIMULATION : il affiche ce qui serait publie
+sans rien envoyer. La publication reelle exige `--confirm`, car pousser sur le
+Hub est une action publique et difficilement reversible.
 
 Usage :
-    python scripts/publish_to_hub.py                       # simulation
-    python scripts/publish_to_hub.py --confirm             # publie l'adaptateur
-    python scripts/publish_to_hub.py --confirm --dataset   # publie aussi le dataset
-    python scripts/publish_to_hub.py --private             # depot prive
+    python scripts/publish_to_hub.py                            # simulation (3B)
+    python scripts/publish_to_hub.py --models all --dataset     # simulation complete
+    python scripts/publish_to_hub.py --models all --dataset --confirm
 """
 from __future__ import annotations
 
@@ -29,11 +28,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import Config  # noqa: E402
-
 DEFAULT_USER = "mrSvet0zar"
-MODEL_REPO = f"{DEFAULT_USER}/qwen2.5-3b-pyds-lora"
 DATASET_REPO = f"{DEFAULT_USER}/corpus-python-ds-ml-fr"
+
+# Chaque modele porte SA propre carte : publier un modele avec les chiffres
+# d'un autre serait exactement le genre d'erreur que ce projet documente.
+MODELES = {
+    "3b": {"adapter": "outputs/qwen2.5-3b-pyds-lora",
+           "repo": f"{DEFAULT_USER}/qwen2.5-3b-pyds-lora",
+           "carte": "MODEL_CARD.md"},
+    "7b": {"adapter": "outputs/qwen2.5-7b-pyds-lora",
+           "repo": f"{DEFAULT_USER}/qwen2.5-7b-pyds-lora",
+           "carte": "MODEL_CARD_7B.md"},
+}
 
 # Fichiers de l'adaptateur : petits, suffisants pour recharger le modele.
 ADAPTER_FILES = [
@@ -70,23 +77,49 @@ def taille_mo(chemins: list[Path]) -> float:
     return sum(p.stat().st_size for p in chemins) / 1e6
 
 
+def publier_modele(api, spec: dict, prive: bool) -> str:
+    """Cree/met a jour un depot de modele et y envoie l'adaptateur."""
+    adapter_dir = PROJECT_ROOT / spec["adapter"]
+    carte = PROJECT_ROOT / spec["carte"]
+
+    api.create_repo(spec["repo"], repo_type="model", private=prive, exist_ok=True)
+    for f in collect_model_files(adapter_dir):
+        api.upload_file(path_or_fileobj=str(f), path_in_repo=f.name,
+                        repo_id=spec["repo"], repo_type="model")
+        print(f"    envoye : {f.name}")
+    # La carte devient le README du depot (convention du Hub)
+    api.upload_file(path_or_fileobj=str(carte), path_in_repo="README.md",
+                    repo_id=spec["repo"], repo_type="model")
+    print(f"    envoye : {carte.name} -> README.md")
+    return f"https://huggingface.co/{spec['repo']}"
+
+
+def publier_dataset(api, repo: str, prive: bool) -> str:
+    api.create_repo(repo, repo_type="dataset", private=prive, exist_ok=True)
+    api.upload_folder(folder_path=str(PROJECT_ROOT / "data" / "corpus"),
+                      path_in_repo="corpus", repo_id=repo, repo_type="dataset")
+    api.upload_folder(folder_path=str(PROJECT_ROOT / "data" / "processed"),
+                      path_in_repo="splits", repo_id=repo, repo_type="dataset")
+    api.upload_file(path_or_fileobj=str(PROJECT_ROOT / "DATASET_CARD.md"),
+                    path_in_repo="README.md", repo_id=repo, repo_type="dataset")
+    print("    envoye : corpus/, splits/, DATASET_CARD.md -> README.md")
+    return f"https://huggingface.co/datasets/{repo}"
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--confirm", action="store_true",
                    help="publie reellement (sinon simulation)")
-    p.add_argument("--dataset", action="store_true",
-                   help="publie aussi le corpus")
-    p.add_argument("--private", action="store_true", help="depot prive")
-    p.add_argument("--model-repo", default=MODEL_REPO)
+    p.add_argument("--models", nargs="*", default=["3b"],
+                   choices=[*MODELES, "all"],
+                   help="modeles a publier (defaut : 3b)")
+    p.add_argument("--dataset", action="store_true", help="publie aussi le corpus")
+    p.add_argument("--private", action="store_true", help="depots prives")
     p.add_argument("--dataset-repo", default=DATASET_REPO)
-    p.add_argument("--adapter", default=None)
     args = p.parse_args()
 
-    cfg = Config()
-    adapter_dir = Path(args.adapter or cfg.train.output_dir)
-    if not adapter_dir.exists():
-        raise SystemExit(f"Adaptateur introuvable : {adapter_dir}\n"
-                         "Lancer d'abord : python train.py")
+    cles = list(MODELES) if "all" in args.models else args.models
+    visibilite = "  (prive)" if args.private else "  (public)"
 
     print("=" * 66)
     print("PUBLICATION SUR LE HUGGING FACE HUB")
@@ -96,75 +129,77 @@ def main() -> None:
     if utilisateur:
         print(f"  Authentifie en tant que : {utilisateur}")
     else:
-        print("  NON AUTHENTIFIE")
-        print("  Executer d'abord :  huggingface-cli login")
+        print("  NON AUTHENTIFIE — executer :  hf auth login")
 
     # --- Inventaire ---
-    fichiers_modele = collect_model_files(adapter_dir)
-    print(f"\nModele  -> {args.model_repo}"
-          f"{'  (prive)' if args.private else '  (public)'}")
-    for f in fichiers_modele:
-        print(f"    {f.name:<32} {f.stat().st_size / 1e6:8.1f} Mo")
-    print(f"    {'MODEL_CARD.md -> README.md':<32} "
-          f"{(PROJECT_ROOT / 'MODEL_CARD.md').stat().st_size / 1e3:8.1f} Ko")
-    print(f"    total : {taille_mo(fichiers_modele):.1f} Mo")
+    total, specs = 0.0, []
+    for cle in cles:
+        spec = MODELES[cle]
+        adapter_dir = PROJECT_ROOT / spec["adapter"]
+        carte = PROJECT_ROOT / spec["carte"]
+        if not adapter_dir.exists():
+            print()
+            print(f"  (ignore : {adapter_dir} absent)")
+            continue
+        if not carte.exists():
+            raise SystemExit(f"Carte manquante : {carte}")
+        specs.append(spec)
+
+        fichiers = collect_model_files(adapter_dir)
+        taille = taille_mo(fichiers)
+        total += taille
+        print()
+        print(f"Modele {cle.upper()} -> {spec['repo']}{visibilite}")
+        for f in fichiers:
+            print(f"    {f.name:<32} {f.stat().st_size / 1e6:8.1f} Mo")
+        print(f"    {spec['carte'] + ' -> README.md':<32} "
+              f"{carte.stat().st_size / 1e3:8.1f} Ko")
+        print(f"    total : {taille:.1f} Mo")
 
     if args.dataset:
         corpus = sorted((PROJECT_ROOT / "data" / "corpus").glob("*.json"))
         splits = sorted((PROJECT_ROOT / "data" / "processed").glob("*.jsonl"))
-        print(f"\nDataset -> {args.dataset_repo}")
+        taille = taille_mo(corpus + splits)
+        total += taille
+        print()
+        print(f"Dataset -> {args.dataset_repo}{visibilite}")
         print(f"    {len(corpus)} fichiers de corpus + {len(splits)} splits")
-        print(f"    total : {taille_mo(corpus + splits):.1f} Mo")
+        print(f"    total : {taille:.1f} Mo")
+
+    print()
+    print(f"VOLUME TOTAL : {total:.1f} Mo")
 
     # --- Simulation ---
     if not args.confirm:
-        print("\n" + "-" * 66)
+        print()
+        print("-" * 66)
         print("MODE SIMULATION — rien n'a ete publie.")
-        print("Pour publier reellement :")
-        print("    python scripts/publish_to_hub.py --confirm"
-              + (" --dataset" if args.dataset else ""))
+        print("Pour publier reellement, ajouter --confirm")
         print("-" * 66)
         return
 
     if not utilisateur:
-        raise SystemExit("\nPublication annulee : authentification absente.\n"
-                         "Executer : huggingface-cli login")
+        raise SystemExit("Publication annulee : authentification absente.")
 
     from huggingface_hub import HfApi
     api = HfApi()
+    urls = []
 
-    # --- Modele ---
-    print(f"\nCreation/mise a jour de {args.model_repo} ...")
-    api.create_repo(args.model_repo, repo_type="model",
-                    private=args.private, exist_ok=True)
-    for f in fichiers_modele:
-        api.upload_file(path_or_fileobj=str(f), path_in_repo=f.name,
-                        repo_id=args.model_repo, repo_type="model")
-        print(f"    envoye : {f.name}")
-    # La model card devient le README du depot (convention du Hub)
-    api.upload_file(path_or_fileobj=str(PROJECT_ROOT / "MODEL_CARD.md"),
-                    path_in_repo="README.md", repo_id=args.model_repo,
-                    repo_type="model")
-    print("    envoye : MODEL_CARD.md -> README.md")
-    print(f"  -> https://huggingface.co/{args.model_repo}")
+    for spec in specs:
+        print()
+        print(f"Publication de {spec['repo']} ...")
+        urls.append(publier_modele(api, spec, args.private))
 
-    # --- Dataset ---
     if args.dataset:
-        print(f"\nCreation/mise a jour de {args.dataset_repo} ...")
-        api.create_repo(args.dataset_repo, repo_type="dataset",
-                        private=args.private, exist_ok=True)
-        api.upload_folder(folder_path=str(PROJECT_ROOT / "data" / "corpus"),
-                          path_in_repo="corpus", repo_id=args.dataset_repo,
-                          repo_type="dataset")
-        api.upload_folder(folder_path=str(PROJECT_ROOT / "data" / "processed"),
-                          path_in_repo="splits", repo_id=args.dataset_repo,
-                          repo_type="dataset")
-        api.upload_file(path_or_fileobj=str(PROJECT_ROOT / "DATASET_CARD.md"),
-                        path_in_repo="README.md", repo_id=args.dataset_repo,
-                        repo_type="dataset")
-        print(f"  -> https://huggingface.co/datasets/{args.dataset_repo}")
+        print()
+        print(f"Publication de {args.dataset_repo} ...")
+        urls.append(publier_dataset(api, args.dataset_repo, args.private))
 
-    print("\nPublication terminee.")
+    print()
+    print("=" * 66)
+    print("PUBLIE :")
+    for u in urls:
+        print(f"  {u}")
 
 
 if __name__ == "__main__":

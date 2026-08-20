@@ -30,6 +30,17 @@ Laptop, 8 Go de VRAM).
 > end-to-end avec graphiques et réponses du modèle déjà exécutés (visibles
 > directement sur GitHub, sans rien lancer).
 
+### 🤗 Publié sur le Hugging Face Hub
+
+| | |
+|---|---|
+| [`qwen2.5-3b-pyds-lora`](https://huggingface.co/mrSvet0zar/qwen2.5-3b-pyds-lora) | adaptateur 3B (120 Mo) |
+| [`qwen2.5-7b-pyds-lora`](https://huggingface.co/mrSvet0zar/qwen2.5-7b-pyds-lora) | adaptateur 7B (162 Mo) |
+| [`corpus-python-ds-ml-fr`](https://huggingface.co/datasets/mrSvet0zar/corpus-python-ds-ml-fr) | le corpus et ses splits |
+
+Les deux adaptateurs partagent **corpus, découpage et hyperparamètres** : ils
+constituent une expérience contrôlée, une seule variable changeant.
+
 ---
 
 ## 🎯 En bref
@@ -119,7 +130,7 @@ Durée : **7 min 25 s** sur la RTX 4070 (~7 Go / 8 Go de VRAM).
 | Fusion LoRA → modèle autonome | ✅ `merge_model.py` |
 | Serveur API (streaming, auth, quotas, métriques) | ✅ TTFT **129 ms** (p50) |
 | Export GGUF + Ollama | 📋 documenté (nécessite llama.cpp) |
-| Publication Hugging Face Hub | 📋 documenté (nécessite un token HF) |
+| Publication Hugging Face Hub | ✅ 2 adaptateurs + le corpus, publics |
 
 > **Note perf** : la réponse complète (~16 s) dépasse la cible < 2 s du cahier
 > des charges, mais le **streaming ramène la latence perçue à 129 ms**. Voir
@@ -917,7 +928,7 @@ ollama create qwen-pyds -f Modelfile
 - [ ] **vLLM** — tenté sous WSL2, **non abouti** (UVA indisponible en GPU-PV +
       incompatibilités de versions). Aucun chiffre avancé
 - [ ] Publier l'image Docker sur un registre
-- [ ] Exécuter la publication HF (nécessite `huggingface-cli login`)
+- [x] Publication HF : 2 adaptateurs + le corpus, avec leurs cartes
 
 ---
 
