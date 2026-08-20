@@ -1,14 +1,30 @@
-# 🤖 Fine-Tuning d'un LLM — Assistant expert Python / Data Science / ML
+# 🤖 Fine-tuning d'un LLM — une démonstration de méthode
 
-Fine-tuning **QLoRA** de **Qwen2.5-3B-Instruct** sur un dataset spécialisé
-Python / Data Science / Machine Learning, entraîné **localement sur une seule
-carte grand public (RTX 4070 Laptop, 8 Go de VRAM)**, avec pipeline complet :
-préparation des données → entraînement → évaluation → fusion → déploiement (API
-FastAPI + Ollama).
+Fine-tuning **QLoRA** de **Qwen2.5-3B** puis **7B**, sur un corpus Python / Data
+Science / ML, entraînés **localement sur une carte grand public** (RTX 4070
+Laptop, 8 Go de VRAM).
 
-> Projet portfolio démontrant la maîtrise du **transfer learning**, du
-> **parameter-efficient fine-tuning (PEFT/LoRA)**, de la **quantization 4-bit**,
-> et du cycle MLOps complet d'un modèle de langage.
+> ### 📌 Ce que ce projet est, et ce qu'il n'est pas
+>
+> **Ce n'est pas un modèle destiné à être utilisé.** Le corpus compte 126
+> concepts — un ordre de grandeur sous ce qu'exigerait un fine-tuning sérieux —
+> et le modèle produit des réponses bien formées mais **parfois factuellement
+> fausses**.
+>
+> **C'est une démonstration de méthodologie d'évaluation.** Le sujet réel du
+> projet n'est pas « faire un modèle », c'est **savoir si ce qu'on mesure veut
+> dire quelque chose**. Le pipeline complet est là (données → entraînement →
+> évaluation → service → déploiement), mais l'essentiel se joue dans la manière
+> dont les résultats sont établis — et parfois **infirmés**.
+
+### Ce que vous trouverez ici
+
+| | |
+|---|---|
+| 🔬 **Trois défauts de mesure trouvés et corrigés** | une [fuite de données](#-correction-méthodologique--une-fuite-de-données-dans-la-v1) qui gonflait les scores *et* masquait un sur-apprentissage ; un [artefact d'orthographe](#-un-artefact-de-mesure--les-accents) qui représentait la moitié du gain annoncé ; un [blocage de la boucle d'événements](#-service-dinférence) dans l'API |
+| 📊 **Des conclusions assorties de leur incertitude** | bootstrap, 3 graines, et des verdicts explicites du type *« ce gain n'est pas établi »* |
+| 🔭 **Une hypothèse testée puis infirmée** | « la limite vient du modèle de base » — [vérifié sur un 7B](#-3b-contre-7b--lhypothèse-mise-à-lépreuve), les données disent le contraire |
+| 🚫 **Un chiffre volontairement absent** | vLLM a été [tenté trois fois sans aboutir](#-vllm--tenté-sous-wsl2-non-abouti--aucun-chiffre-avancé) ; aucun gain n'est avancé faute de mesure |
 
 > 📓 **Démo rapide** : [`notebooks/demo.ipynb`](notebooks/demo.ipynb) — parcours
 > end-to-end avec graphiques et réponses du modèle déjà exécutés (visibles
@@ -35,7 +51,7 @@ réponse partagée). Quatre approches comparées, **toutes avec la même
 connaissance disponible** (les 85 concepts d'entraînement) et la même procédure
 de décodage — seul le mécanisme change. Intervalles de confiance à 95 % par
 **bootstrap** (1000 rééchantillonnages), accents normalisés des deux côtés
-(voir [l'artefact de mesure](#️-un-artefact-de-mesure--les-accents)) :
+(voir [l'artefact de mesure](#-un-artefact-de-mesure--les-accents)) :
 
 | Approche | ROUGE-1 | ROUGE-L | BLEU |
 |---|---|---|---|
@@ -141,7 +157,7 @@ mesurait de la mémorisation, pas de la généralisation.
    protocole propre. Le *gain relatif* du fine-tuning reste réel — mais un
    second artefact, celui des accents, le réduira encore ensuite (de +38 % à
    environ **+18 %** de ROUGE-1). Voir
-   [l'artefact de mesure](#️-un-artefact-de-mesure--les-accents).
+   [l'artefact de mesure](#-un-artefact-de-mesure--les-accents).
 2. **Overfitting masqué.** En v1, la loss de validation décroissait sagement
    (2,19 → 1,68), suggérant un apprentissage sain. Une fois la fuite éliminée,
    elle **remonte dès la 2ᵉ epoch** : le modèle sur-apprenait, et la fuite le
